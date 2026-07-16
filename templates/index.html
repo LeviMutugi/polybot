@@ -784,6 +784,15 @@
                     <span id="botManagerArrow" style="transition: transform 0.3s; font-size: 14px;">▼</span>
                 </div>
                 <div id="botManagerContent" style="display: none; margin-top: 20px;">
+                    <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; background: rgba(255, 255, 255, 0.02); padding: 12px 18px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                        <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">Apply Mode to All Strategies:</span>
+                        <select id="globalModeSelect" class="control-input" onchange="setGlobalStrategyMode(this)" style="background:#1b203c; width: 200px; padding: 6px 10px; font-size: 12px;">
+                            <option value="">-- Select Mode --</option>
+                            <option value="manual">Manual (Read Only)</option>
+                            <option value="semi">Semi-Auto (Approval Req)</option>
+                            <option value="auto">Auto (Bot Executes)</option>
+                        </select>
+                    </div>
                     <div class="strategy-grid" id="strategyManagerGrid">
                         <!-- Populated dynamically -->
                     </div>
@@ -2181,6 +2190,39 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key: `${key}.exec_mode`, value: val })
             });
+        }
+
+        async function setGlobalStrategyMode(el) {
+            const mode = el.value;
+            if (!mode) return;
+            
+            const confirmed = await CustomDialog.confirm(
+                `Are you sure you want to set ALL strategies to ${mode.toUpperCase()} mode?`,
+                'Confirm Global Mode Change',
+                '⚠️'
+            );
+            if (!confirmed) {
+                el.value = "";
+                return;
+            }
+
+            logEvent(`[SYSTEM] Setting all strategies to ${mode.toUpperCase()} mode...`);
+            
+            const promises = strategiesList.map(s => {
+                return fetch('/api/poly-yield/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: `${s.key}.exec_mode`, value: mode })
+                });
+            });
+            
+            try {
+                await Promise.all(promises);
+                logEvent(`[SYSTEM] All strategies updated to ${mode.toUpperCase()} mode.`);
+                el.value = ""; // Reset selector
+            } catch (e) {
+                logEvent(`[SYSTEM] Error updating global mode: ${e}`);
+            }
         }
 
         async function saveStrategyParam(fullKey, el, multiplier) {
