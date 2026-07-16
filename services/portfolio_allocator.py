@@ -157,13 +157,25 @@ class PortfolioAllocator:
         else:
             exec_mode = await cfg.get_typed(f"{strategy_key}.exec_mode", str, "auto")
         
+        # Sanitize Kelly inputs: both MUST be fractions in (0, 1). Anything else
+        # (e.g. a percent passed by mistake) falls back to fixed-fraction sizing
+        # instead of silently producing a max-size Kelly bet.
+        kelly_inputs_valid = (
+            implied_price is not None and true_prob is not None
+            and 0.0 < float(implied_price) < 1.0
+            and 0.0 < float(true_prob) <= 1.0
+        )
+        if (implied_price is not None and true_prob is not None) and not kelly_inputs_valid:
+            _log.warning("[Allocator] Kelly inputs out of range (implied=%s, true=%s) — falling back to fixed sizing",
+                         implied_price, true_prob)
+
         # Capital Allocation calculation
         if exec_mode == "manual":
             # Direct manual capital allocated
             allocated_usdc = suggested_usdc
         else:
             # Automatic / Semi-Automatic Kelly sizing
-            if implied_price is not None and true_prob is not None:
+            if kelly_inputs_valid:
                 if true_prob <= implied_price:
                     raise AllocationDeniedError(
                         f"Kelly sizing denied: True probability ({true_prob*100:.1f}%) <= Implied price ({implied_price*100:.1f}%)"
@@ -175,6 +187,9 @@ class PortfolioAllocator:
                 # Default fallback sizing
                 max_pos_pct = await cfg.get_typed(f"{strategy_key}.max_position_pct", float, 0.05)
                 allocated_usdc = total_balance * max_pos_pct
+            # Never allocate more than the strategy suggested for this opportunity
+            if suggested_usdc and suggested_usdc > 0:
+                allocated_usdc = min(allocated_usdc, suggested_usdc)
 
         # Clip allocation to available room inside drawdown limits
         remaining_room = max_allowed_exposure - current_exposure

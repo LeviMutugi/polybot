@@ -31,13 +31,15 @@ class LongshotMMStrategy(BaseStrategy):
         position_pct = await cfg.get_typed("s6_longshot.position_pct", float, 0.02)
         exec_mode = await cfg.get_typed("s6_longshot.exec_mode", str, "auto")
 
-        # Query open positions from database to check limits
+        # Query open positions from database to check limits (current mode only —
+        # paper positions must not consume live slots and vice versa)
+        active_mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
         from db.database import get_sqlite, _sqlite_lock
         conn = get_sqlite()
         with _sqlite_lock:
             row = conn.execute(
-                "SELECT COUNT(*) as c FROM poly_yield_positions WHERE strategy = ? AND status = 'open'",
-                [self.key]
+                "SELECT COUNT(*) as c FROM poly_yield_positions WHERE strategy = ? AND status = 'open' AND mode = ?",
+                [self.key, active_mode]
             ).fetchone()
         open_count = row["c"] if row else 0
         available_slots = max_positions - open_count
@@ -92,12 +94,16 @@ class LongshotMMStrategy(BaseStrategy):
                     if not token_id_no:
                         continue
 
+                    from strategies.base import is_fillable
+                    max_slippage = await cfg.get_typed("poly_yield.max_slippage_pct", float, 1.5)
                     exec_data = await calculate_execution_price(token_id_no, pos_usdc, side="buy", http_client=http_client)
-                    if "error" in exec_data:
+                    if not is_fillable(exec_data, max_slippage):
                         continue
 
                     real_no_price = exec_data["price"]
                     slippage = exec_data.get("slippage", 0)
+                    if real_no_price <= 0:
+                        continue
 
                     # Real implied sell price of YES
                     real_sell_price = 1.0 - real_no_price
@@ -132,8 +138,9 @@ class LongshotMMStrategy(BaseStrategy):
                         "entry_price": round(real_no_price, 4),
                         "yes_price": round(yes_price, 4),
                         "no_price": round(real_no_price, 4),
-                        "implied_prob": round(real_no_price * 100, 2), # implied probability of success (NO)
-                        "est_true_prob": round((1.0 - est_true_prob) * 100, 2), # true probability of success (NO)
+                        "implied_prob": round(real_no_price * 100, 2), # implied probability of success (NO, display %)
+                        # est_true_prob is a FRACTION (0-1) consumed directly by the Kelly sizer
+                        "est_true_prob": round(1.0 - est_true_prob, 4), # true probability of success (NO)
                         "slippage_bps": round(slippage * 100, 2),
                         "expected_value_usdc": round(expected_value_usdc, 2),
                         "profit_pct": round(edge_pct, 2),

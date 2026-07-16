@@ -38,6 +38,11 @@ class SplitShareFarmingStrategy(BaseStrategy):
                 return []
 
             reward_markets = resp.json()
+            # API may wrap the list in {"data": [...]}
+            if isinstance(reward_markets, dict):
+                reward_markets = reward_markets.get("data") or []
+            if not isinstance(reward_markets, list):
+                return []
         except Exception:
             return []
 
@@ -62,11 +67,11 @@ class SplitShareFarmingStrategy(BaseStrategy):
                 min_size = float(rm.get("min_size", 5.0))
 
                 suggested_usdc = max(min_size, balance * max_pos_pct)
-                
-                # Placement 1c inside spread for max rewards score
-                yes_limit = round(mid_price - 0.01, 3)
-                no_limit = round((1 - mid_price) - 0.01, 3)
-                
+
+                # Placement 1c inside spread for max rewards score (clamped to valid price range)
+                yes_limit = min(0.99, max(0.01, round(mid_price - 0.01, 3)))
+                no_limit = min(0.99, max(0.01, round((1 - mid_price) - 0.01, 3)))
+
                 # Reward score math
                 dist = 0.01
                 reward_score = round(((max_spread - dist) / max_spread) ** 2 * suggested_usdc, 4) if max_spread > 0 else 0.0
@@ -74,7 +79,9 @@ class SplitShareFarmingStrategy(BaseStrategy):
                 opps.append({
                     "id": f"s2_{condition_id}",
                     "strategy": self.key,
-                    "market_id": str(condition_id),
+                    # Use the Gamma market id (settlement & UI lookups resolve via /markets/{id};
+                    # a condition_id here would 404 every downstream fetch)
+                    "market_id": str(market_meta.get("id", condition_id)),
                     "market_title": market_meta.get("question", f"Market {condition_id}"),
                     "market_url": get_market_url(market_meta),
                     "outcome": "YES + NO shares (Neutral LP)",

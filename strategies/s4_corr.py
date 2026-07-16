@@ -19,7 +19,7 @@ class CorrelationArbitrageStrategy(BaseStrategy):
             name="Correlation Arb",
             risk_level="Low",
             market_type="Binary",
-            default_exec_mode="auto"
+            default_exec_mode="semi"
         )
 
     async def scan(self, markets: List[dict], balance: float, http_client: httpx.AsyncClient) -> List[dict]:
@@ -29,26 +29,23 @@ class CorrelationArbitrageStrategy(BaseStrategy):
 
         min_gap_pct = await cfg.get_typed("s4_corr.min_gap_pct", float, 1.0)
         max_pos_pct = await cfg.get_typed("s4_corr.max_position_pct", float, 0.05)
-        exec_mode = await cfg.get_typed("s4_corr.exec_mode", str, "auto")
+        exec_mode = await cfg.get_typed("s4_corr.exec_mode", str, "semi")
 
-        # Load correlation rules
+        # Load correlation rules — ONLY user-curated rules are used. Substring keyword
+        # matching against arbitrary market titles is far too loose to auto-trade on:
+        # a wrong pair means buying a market with no actual logical relationship.
+        # Configure via config key s4_corr.correlation_rules as JSON:
+        #   [["parent keyword (superset event B)", "child keyword (subset event A)"], ...]
         raw_rules = await cfg.get_async("s4_corr.correlation_rules", "[]")
         try:
             rules = json.loads(raw_rules)
-            if not isinstance(rules, list) or len(rules) == 0:
-                raise ValueError()
+            if not isinstance(rules, list):
+                rules = []
+            rules = [r for r in rules if isinstance(r, (list, tuple)) and len(r) == 2]
         except Exception:
-            rules = [
-                ("afc wins", "chiefs win"),
-                ("nfc wins", "cowboys win"),
-                ("nfc wins", "eagles win"),
-                ("will happen in 2026", "will happen before july 2026"),
-                ("will happen in 2026", "will happen in h1 2026"),
-                ("will happen in 2026", "will happen in q1 2026"),
-                ("republican wins", "trump wins"),
-                ("democrat wins", "biden wins"),
-                ("democrat wins", "harris wins"),
-            ]
+            rules = []
+        if not rules:
+            return []
 
         # Index markets by question
         mkt_index = {}
@@ -92,8 +89,10 @@ class CorrelationArbitrageStrategy(BaseStrategy):
                     if not token_id_parent:
                         continue
 
+                    from strategies.base import is_fillable
+                    max_slippage = await cfg.get_typed("poly_yield.max_slippage_pct", float, 1.5)
                     exec_data = await calculate_execution_price(token_id_parent, suggested_usdc, side="buy", http_client=http_client)
-                    if "error" in exec_data:
+                    if not is_fillable(exec_data, max_slippage):
                         continue
 
                     real_parent_yes = exec_data["price"]
@@ -110,8 +109,11 @@ class CorrelationArbitrageStrategy(BaseStrategy):
                     days = days_to_expiry(pv["market"].get("endDate"))
                     market_url = get_market_url(pv["market"])
 
+                    from strategies.base import calculate_simple_apy
                     opps.append({
-                        "id": f"s4_{uuid.uuid4().hex[:8]}",
+                        # Deterministic ID: a random uuid would create a new row per scan,
+                        # leaving an ever-growing trail of duplicate/stale entries
+                        "id": f"s4_{pv['market'].get('id', '')}_{cv['market'].get('id', '')}",
                         "strategy": self.key,
                         "market_id": str(pv["market"].get("id", "")),
                         "market_title": pv["market"].get("question", ""),
@@ -122,7 +124,7 @@ class CorrelationArbitrageStrategy(BaseStrategy):
                         "no_price": round(1.0 - parent_yes, 4),
                         "implied_prob": round(real_parent_yes * 100, 2),
                         "slippage_bps": round(slippage * 100, 2),
-                        "annualized_apy": round(net_gap_pct * (365.0 / max(0.1, days)), 2) if days else None,
+                        "annualized_apy": round(calculate_simple_apy(net_gap_pct, days), 2) if days else None,
                         "profit_pct": round(net_gap_pct, 2),
                         "days_to_expiry": round(days, 1) if days else None,
                         "action": "buy_yes",

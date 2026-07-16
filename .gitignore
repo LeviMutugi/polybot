@@ -3,3 +3,10 @@ __pycache__/
 .env
 venv/
 env/
+.secret
+poly_yield.db
+poly_yield.db-*
+*.json
+!package.json
+*.patch
+.pytest_cache/

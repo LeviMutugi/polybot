@@ -32,7 +32,11 @@ class SubEventArbitrageStrategy(BaseStrategy):
         max_pos_pct = await cfg.get_typed("s5_sub_event.max_position_pct", float, 0.05)
         exec_mode = await cfg.get_typed("s5_sub_event.exec_mode", str, "manual")
 
-        # Group markets by parent slug
+        # Group markets by parent slug.
+        # HONEST LIMITATION: Polymarket slugs do not encode a parent/child hierarchy, so
+        # this grouping rarely (if ever) matches. Reliable parent↔sub-event mapping needs
+        # manual curation or the Gamma events API. Until then S5 stays manual-mode and
+        # will simply produce no opportunities rather than wrong ones.
         slug_groups = {}
         for m in markets:
             slug = m.get("slug") or ""
@@ -107,28 +111,32 @@ class SubEventArbitrageStrategy(BaseStrategy):
             total_gas = 0.0
 
             try:
+                from strategies.base import is_fillable
+                max_slippage = await cfg.get_typed("poly_yield.max_slippage_pct", float, 1.5)
                 if action == "buy_parent_yes":
                     # Single leg buy on parent
                     if not parent_token:
                         continue
                     exec_data = await calculate_execution_price(parent_token, suggested_usdc, side="buy", http_client=http_client)
-                    if "error" in exec_data:
+                    if not is_fillable(exec_data, max_slippage):
                         continue
                     fill_parent_yes = exec_data["price"]
                     total_slippage = exec_data["slippage"]
                     total_gas = scan_gas_usdc
-                    
+
                     actual_gap_pct = (sub_sum - fill_parent_yes) * 100
                 else:
                     # Basket buy on sub-events
                     actual_basket_cost = 0.0
                     total_gas = len(sub_legs) * scan_gas_usdc
-                    
+
                     for leg in sub_legs:
+                        if not leg.get("token_id") or leg["price"] <= 0:
+                            raise ValueError("Sub-leg missing token or price")
                         leg_target_usdc = (leg["price"] / sub_sum) * suggested_usdc
                         l_exec = await calculate_execution_price(leg["token_id"], leg_target_usdc, side="buy", http_client=http_client)
-                        if "error" in l_exec:
-                            raise ValueError(l_exec["error"])
+                        if not is_fillable(l_exec, max_slippage):
+                            raise ValueError(l_exec.get("error") or l_exec.get("warning") or "Sub-leg not fillable")
                         actual_basket_cost += (l_exec["price"] * (leg_target_usdc / leg["price"]))
                         total_slippage += l_exec["slippage"]
 
@@ -145,6 +153,7 @@ class SubEventArbitrageStrategy(BaseStrategy):
 
                 days = days_to_expiry(parent_market.get("endDate"))
                 parent_url = get_market_url(parent_market)
+                from strategies.base import calculate_simple_apy
 
                 opps.append({
                     "id": f"s5_{parent_market.get('id', '')}",
@@ -158,7 +167,7 @@ class SubEventArbitrageStrategy(BaseStrategy):
                     "no_price": round(1.0 - parent_yes, 4),
                     "implied_prob": round(parent_yes * 100, 2),
                     "slippage_bps": round(total_slippage * 100, 2),
-                    "annualized_apy": round(net_profit_pct * (365.0 / max(0.1, days)), 2) if days else None,
+                    "annualized_apy": round(calculate_simple_apy(net_profit_pct, days), 2) if days else None,
                     "profit_pct": round(net_profit_pct, 2),
                     "days_to_expiry": round(days, 1) if days else None,
                     "action": action,

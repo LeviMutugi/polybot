@@ -61,9 +61,11 @@ class FavoriteCompoundingStrategy(BaseStrategy):
                     # Sizing
                     suggested_usdc = max(0.50, balance * max_pos_pct)
 
-                    # Walk book depth
+                    # Walk book depth — skip if not fillable within slippage tolerance
+                    from strategies.base import is_fillable, calculate_simple_apy
+                    max_slippage = await cfg.get_typed("poly_yield.max_slippage_pct", float, 1.5)
                     exec_data = await calculate_execution_price(token_id, suggested_usdc, side="buy", http_client=http_client)
-                    if "error" in exec_data:
+                    if not is_fillable(exec_data, max_slippage):
                         continue
 
                     real_price = exec_data["price"]
@@ -73,10 +75,10 @@ class FavoriteCompoundingStrategy(BaseStrategy):
                     if shares <= 0:
                         continue
 
-                    # Net APY calculation
+                    # Net APY calculation (simple annualization, days floored at 1)
                     net_gain_per_share = (1.0 - real_price) - (scan_gas_usdc / shares)
                     net_yield = net_gain_per_share / real_price
-                    real_apy = net_yield * (365.0 / max(0.1, days)) * 100
+                    real_apy = calculate_simple_apy(net_yield * 100, days)
 
                     if real_apy < min_apy:
                         continue

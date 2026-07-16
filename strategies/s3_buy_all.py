@@ -65,15 +65,18 @@ class BuyAllArbitrageStrategy(BaseStrategy):
                 leg_details = []
                 total_slippage = 0.0
 
+                from strategies.base import is_fillable
+                max_slippage = await cfg.get_typed("poly_yield.max_slippage_pct", float, 1.5)
+
                 for i, o_price in enumerate(float_prices):
                     leg_target_usdc = shares_target * o_price  # Equal shares × leg price
                     token_id = token_ids[i] if i < len(token_ids) else None
                     if not token_id:
                         raise ValueError("Missing token ID")
-                        
+
                     exec_data = await calculate_execution_price(token_id, leg_target_usdc, side="buy", http_client=http_client)
-                    if "error" in exec_data:
-                        raise ValueError(exec_data["error"])
+                    if not is_fillable(exec_data, max_slippage):
+                        raise ValueError(exec_data.get("error") or exec_data.get("warning") or "Leg not fillable within slippage tolerance")
 
                     leg_fill_price = exec_data["price"]
                     # Actual shares we get at this fill price
@@ -106,7 +109,8 @@ class BuyAllArbitrageStrategy(BaseStrategy):
                     continue
 
                 days = days_to_expiry(market.get("endDate"))
-                annualized_apy = real_profit_pct * (365.0 / max(0.1, days)) if days else None
+                from strategies.base import calculate_simple_apy
+                annualized_apy = calculate_simple_apy(real_profit_pct, days) if days else None
 
                 market_url = get_market_url(market)
                 avg_slippage = total_slippage / len(outcomes)
