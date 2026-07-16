@@ -33,9 +33,6 @@ _bearer = HTTPBearer(auto_error=False)
 
 async def verify_token(creds: HTTPAuthorizationCredentials = Depends(_bearer)):
     """Validate Bearer token against the configured api_secret."""
-    print(f"DEBUG AUTH: creds={creds}, expected={settings.api_secret}")
-    if creds:
-        print(f"DEBUG AUTH: creds.credentials={creds.credentials}")
     if not settings.api_secret or settings.api_secret == "poly_yield_default_secret_key_change_me":
         return  # Skip auth if default/unset (development mode)
     if not creds or creds.credentials != settings.api_secret:
@@ -85,13 +82,32 @@ async def shutdown_event():
 
 @app.get("/api/poly-yield/opportunities")
 async def get_opportunities():
-    """Retrieve scanned opportunities from database."""
+    """Retrieve FRESH, still-open opportunities. Stale or already-executed rows are
+    never returned — displaying them invites executing against dead prices."""
+    interval = await cfg.get_typed("poly_yield.scan_interval_s", int, 120)
+    max_age_s = max(300, interval * 3)
+
     conn = get_sqlite()
     with _sqlite_lock:
         rows = conn.execute(
-            "SELECT * FROM poly_yield_opportunities ORDER BY updated_at DESC"
+            "SELECT * FROM poly_yield_opportunities "
+            "WHERE status = 'open' AND updated_at >= datetime('now', ?) "
+            "ORDER BY updated_at DESC",
+            [f"-{max_age_s} seconds"]
         ).fetchall()
-    
+
+    # Compute sizing context ONCE (wallet balance can involve an RPC call in live mode —
+    # never do that per-row)
+    mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
+    balance = await portfolio_allocator._get_wallet_balance()
+    drawdown_limit_pct = await cfg.get_typed("poly_yield.auto_exec_drawdown_limit", float, 50.0)
+    with _sqlite_lock:
+        exp_row = conn.execute(
+            "SELECT SUM(cost_usdc) as exposure FROM poly_yield_positions WHERE status = 'open' AND mode = ?", [mode]
+        ).fetchone()
+    current_exposure = exp_row["exposure"] if exp_row and exp_row["exposure"] is not None else 0.0
+    remaining_room = max(0.0, balance * (drawdown_limit_pct / 100.0) - current_exposure)
+
     opportunities = []
     for row in rows:
         d = dict(row)
@@ -100,27 +116,13 @@ async def get_opportunities():
             d["legs"] = json.loads(d["legs"])
         if d.get("instructions"):
             d["instructions"] = json.loads(d["instructions"])
-            
-        # Dynamically recalculate suggested size based on current wallet balance
-        from services.portfolio_allocator import portfolio_allocator, AllocationDeniedError
-        try:
-            true_prob = (d.get("implied_prob") / 100.0) if d.get("implied_prob") is not None else None
-            alloc = await portfolio_allocator.request_allocation(
-                strategy_key=d["strategy"],
-                market_id=d["market_id"],
-                suggested_usdc=d.get("suggested_usdc", 0.0),
-                implied_price=d.get("entry_price"),
-                true_prob=true_prob
-            )
-            d["suggested_usdc"] = alloc
-        except AllocationDeniedError:
-            d["suggested_usdc"] = 0.0
-        except Exception as e:
-            # Fallback
-            pass
-            
+
+        # Display sizing: clip the strategy's suggested size to remaining drawdown room.
+        # (The authoritative sizing check re-runs at execution time.)
+        suggested = float(d.get("suggested_usdc") or 0.0)
+        d["suggested_usdc"] = round(min(suggested, remaining_room), 2)
         opportunities.append(d)
-        
+
     return opportunities
 
 @app.get("/api/poly-yield/positions")
@@ -147,14 +149,6 @@ async def get_wallet_balance():
     """Retrieve current wallet balance for the active mode."""
     balance = await portfolio_allocator._get_wallet_balance()
     return {"balance": balance}
-
-@app.get("/api/debug-secret")
-async def get_debug_secret():
-    return {"secret": settings.api_secret}
-
-@app.get("/api/debug-auth")
-async def get_debug_auth(creds: HTTPAuthorizationCredentials = Depends(_bearer)):
-    return {"creds": creds.credentials if creds else None, "expected": settings.api_secret, "match": (creds.credentials == settings.api_secret) if creds else False}
 
 @app.post("/api/poly-yield/stats/reset")
 async def reset_stats(_=Depends(verify_token)):
@@ -186,9 +180,21 @@ async def get_config():
         rows = conn.execute("SELECT key, value FROM system_config").fetchall()
     return {r["key"]: r["value"] for r in rows}
 
+# Keys whose value is money-integrity-critical and must only change through the
+# audited wallet endpoints (deposit/reset write a ledger entry; a raw config write
+# would silently break conservation-of-money checks).
+PROTECTED_CONFIG_KEYS = {"portfolio.paper_balance"}
+
 @app.post("/api/poly-yield/config")
 async def update_config(update: ConfigUpdate, _=Depends(verify_token)):
     """Update a configuration value dynamically."""
+    if not update.key or not update.key.strip():
+        raise HTTPException(status_code=400, detail="Config key cannot be empty")
+    if update.key in PROTECTED_CONFIG_KEYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{update.key}' cannot be set directly. Use the paper-deposit/paper-reset endpoints so the wallet ledger stays consistent."
+        )
     await cfg.set_async(update.key, update.value)
     # Restart loops or propagate configurations if required
     if update.key == "poly_yield.enabled" and update.value.lower() == "true":
@@ -271,6 +277,24 @@ async def save_key(submit: KeySubmit, _=Depends(verify_token)):
 @app.post("/api/poly-yield/manual-trade")
 async def place_manual_trade(trade: ManualTradeArgs, _=Depends(verify_token)):
     """Place a manual trade bypassing strategy evaluations."""
+    # Input validation — a price outside (0,1) or non-positive stake corrupts
+    # share math (division by zero / negative shares)
+    if not trade.market_id or not trade.market_id.strip():
+        raise HTTPException(status_code=400, detail="market_id is required")
+    if not (0.0 < trade.price < 1.0):
+        raise HTTPException(status_code=400, detail="Price must be between 0 and 1 (exclusive)")
+    if trade.stake_usdc <= 0:
+        raise HTTPException(status_code=400, detail="Stake must be positive")
+    for label, v in (("Stop loss", trade.stop_loss_price), ("Take profit", trade.take_profit_price)):
+        if v is not None and not (0.0 < v < 1.0):
+            raise HTTPException(status_code=400, detail=f"{label} price must be between 0 and 1")
+    if trade.trailing_stop_pct is not None and not (0.0 < trade.trailing_stop_pct < 100.0):
+        raise HTTPException(status_code=400, detail="Trailing stop must be between 0 and 100 percent")
+    if trade.stop_loss_price is not None and trade.stop_loss_price >= trade.price:
+        raise HTTPException(status_code=400, detail="Stop loss must be below the entry price")
+    if trade.take_profit_price is not None and trade.take_profit_price <= trade.price:
+        raise HTTPException(status_code=400, detail="Take profit must be above the entry price")
+
     opp = {
         "id": f"opp_manual_{uuid.uuid4().hex[:8]}",
         "strategy": "manual",
@@ -305,6 +329,8 @@ async def place_manual_trade(trade: ManualTradeArgs, _=Depends(verify_token)):
 @app.post("/api/poly-yield/exit/{pos_id}")
 async def exit_open_position(pos_id: str, args: ExitArgs, _=Depends(verify_token)):
     """Manually exit an open position."""
+    if not (0.0 < args.current_price <= 1.0):
+        raise HTTPException(status_code=400, detail="Exit price must be between 0 and 1")
     res = await poly_yield_engine.exit_position(pos_id, args.current_price, reason="Manual Exit")
     if res.get("success"):
         return res
@@ -363,7 +389,8 @@ async def websocket_endpoint(websocket: WebSocket):
             # Maintain active connection
             await websocket.receive_text()
     except WebSocketDisconnect:
-        active_websockets.remove(websocket)
+        if websocket in active_websockets:
+            active_websockets.remove(websocket)
     except Exception:
         if websocket in active_websockets:
             active_websockets.remove(websocket)
@@ -386,3 +413,10 @@ async def serve_dashboard(request: Request):
             </body>
         </html>
         """
+
+
+if __name__ == "__main__":
+    # Allows `python main.py` / `pm2 start main.py --interpreter python3` to actually
+    # boot the server (previously this file defined the app but never ran it).
+    import uvicorn
+    uvicorn.run(app, host=settings.host, port=settings.port)

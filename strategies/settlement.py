@@ -105,17 +105,21 @@ class PolyYieldSettlement:
             if not token_id:
                 continue
 
-            # Fetch current bid price from order book
+            # Fetch current BEST bid price from order book (levels must be sorted —
+            # the raw API returns bids ascending, so bids[0] would be the WORST bid)
             clob_url = settings.polymarket_clob_url.rstrip("/")
             try:
                 r = await self._http.get(f"{clob_url}/book", params={"token_id": token_id})
                 if r.status_code != 200:
                     continue
                 book = r.json()
-                bids = book.get("bids", [])
+                from strategies.base import sort_book_levels
+                bids = sort_book_levels(book.get("bids") or [], "bids")
                 if not bids:
                     continue
                 current_price = float(bids[0]["price"])
+                if not (0 < current_price <= 1.0):
+                    continue
             except Exception as e:
                 _log.debug("Failed to fetch price for stop check on %s: %s", pos_id, e)
                 continue
@@ -239,26 +243,21 @@ class PolyYieldSettlement:
         return settled_count
 
     def _winning_outcome(self, market: dict) -> Optional[str]:
+        """Determine the resolved winner. Requires a definitive (>= 0.99) settlement price —
+        a mere majority price on a closed-but-unresolved market must NEVER settle a position,
+        otherwise PnL is realized on a guess."""
         outcomes = parse_list(market.get("outcomes"))
         prices = parse_list(market.get("outcomePrices"))
         if not outcomes or len(prices) != len(outcomes):
             return None
-        
-        # Check if an outcome price is >= 0.99
+
         for outcome, price in zip(outcomes, prices):
             try:
                 if float(price) >= 0.99:
                     return str(outcome)
             except (TypeError, ValueError):
                 continue
-        
-        # Fallback to the maximum outcome price if above 50%
-        try:
-            best_idx = max(range(len(prices)), key=lambda i: float(prices[i] or 0))
-            if float(prices[best_idx] or 0) >= 0.5:
-                return str(outcomes[best_idx])
-        except Exception:
-            pass
+        # Not definitively resolved yet — keep the position open and re-check next poll
         return None
 
     def _position_won(self, pos: dict, winning_outcome: str) -> bool:
@@ -312,8 +311,9 @@ class PolyYieldSettlement:
         if predicted_apy is None or cost <= 0 or not days or float(days) <= 0:
             return None
         
-        actual_return_pct = (realized_pnl / cost) * 100.0
-        actual_apy = actual_return_pct * (365.0 / float(days))
+        # Use the same compounding formula as predicted APY so the delta compares like with like
+        from strategies.base import calculate_compounding_apy
+        actual_apy = calculate_compounding_apy(realized_pnl / cost, float(days))
         return round(actual_apy - float(predicted_apy), 4)
 
     def _update_stats(self, conn, strategy: str, realized_pnl: float, status: str, mode: str, cost_usdc: float = 0.0):
@@ -354,9 +354,11 @@ class PolyYieldSettlement:
         import web3
         from eth_account import Account
         from strategies.engine import poly_yield_engine
-        
+
         acct = Account.from_key(pk)
-        w3 = web3.Web3(web3.AsyncHTTPProvider(settings.polygon_rpc_url))
+        # AsyncWeb3 is required with AsyncHTTPProvider — mixing sync Web3 with an async
+        # provider makes every awaited eth call fail at runtime
+        w3 = web3.AsyncWeb3(web3.AsyncHTTPProvider(settings.polygon_rpc_url))
         
         # Get CTF Address from ClobClient if available
         ctf_address = "0x4D97DCd97eC945f40CF65F87097CAe16E4bb2830" # Polygon CTF Address

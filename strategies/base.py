@@ -70,6 +70,20 @@ def get_market_url(market: dict) -> str:
         return f"{base}/market/{market.get('id', '')}"
     return f"{base}/market/{slug}"
 
+def sort_book_levels(levels: list, side: str) -> list:
+    """
+    Normalize CLOB book levels to best-price-first order regardless of API ordering.
+    (Polymarket's /book returns bids ascending and asks descending — best price LAST —
+    so naive iteration walks the WORST prices first.)
+    Asks: ascending price (cheapest first). Bids: descending price (highest first).
+    """
+    def _price(lvl):
+        try:
+            return float(lvl["price"])
+        except (TypeError, ValueError, KeyError):
+            return 0.0
+    return sorted(levels, key=_price, reverse=(side == "bids"))
+
 async def calculate_execution_price(token_id: str, amount_usdc: float, side: str = "buy", http_client: httpx.AsyncClient = None) -> dict:
     """
     Volume-Weighted Average Price (VWAP) walking for L2 Order Book Depth.
@@ -90,16 +104,18 @@ async def calculate_execution_price(token_id: str, amount_usdc: float, side: str
             return {"price": 0.5, "slippage": 0, "error": "CLOB book unreachable"}
 
         data = r.json()
-        levels = data.get("asks" if side == "buy" else "bids", [])
+        bids = sort_book_levels(data.get("bids") or [], "bids")
+        asks = sort_book_levels(data.get("asks") or [], "asks")
+        levels = asks if side == "buy" else bids
         if not levels:
             return {"price": 0.0, "slippage": 100.0, "error": "No liquidity"}
 
         total_filled_usdc = 0.0
         total_shares = 0.0
-        
-        # Calculate best prices
-        best_bid = float(data.get("bids", [{"price": 0}])[0]["price"])
-        best_ask = float(data.get("asks", [{"price": 1}])[0]["price"])
+
+        # Best prices after normalization: element 0 is top of book
+        best_bid = float(bids[0]["price"]) if bids else 0.0
+        best_ask = float(asks[0]["price"]) if asks else 1.0
         base_price = best_ask if side == "buy" else best_bid
         if base_price == 0:
             base_price = 0.5
@@ -147,6 +163,24 @@ async def calculate_execution_price(token_id: str, amount_usdc: float, side: str
             await http_client.aclose()
 
 
+def is_fillable(exec_data: dict, max_slippage_pct: float) -> bool:
+    """
+    True when a VWAP book walk indicates the order can actually be filled
+    within the slippage tolerance. Guards against both explicit errors and the
+    'insufficient liquidity' warning path (which reports slippage 99).
+    """
+    if not exec_data or "error" in exec_data:
+        return False
+    if "warning" in exec_data:
+        return False
+    if float(exec_data.get("price") or 0) <= 0:
+        return False
+    if float(exec_data.get("slippage") or 0) > max_slippage_pct:
+        return False
+    return True
+
+APY_CAP_PCT = 100000.0  # sanity ceiling so short-dated markets can't display absurd figures
+
 def calculate_compounding_apy(net_yield: float, days: float) -> float:
     """
     Computes the annualized APY using compounding interest formula.
@@ -155,11 +189,25 @@ def calculate_compounding_apy(net_yield: float, days: float) -> float:
     """
     if days is None or days <= 0:
         return 0.0
+    if net_yield is None:
+        return 0.0
+    if net_yield <= -1.0:
+        return -100.0
     effective_days = max(1.0, float(days))
-    
+
     # APY = (1 + Return)^(365/days) - 1
     try:
         apy = ((1.0 + net_yield) ** (365.0 / effective_days)) - 1.0
-        return float(apy * 100.0) # Convert to percentage
+        return float(min(apy * 100.0, APY_CAP_PCT)) # Convert to percentage, capped
     except OverflowError:
-        return 99999.99 # Cap on extreme overflow
+        return APY_CAP_PCT
+
+def calculate_simple_apy(net_yield_pct: float, days: float) -> float:
+    """
+    Simple (non-compounding) annualization of a percentage return.
+    Floors days at 1.0 so intraday markets can't multiply by 3650x.
+    """
+    if days is None or days <= 0 or net_yield_pct is None:
+        return 0.0
+    effective_days = max(1.0, float(days))
+    return float(min(net_yield_pct * (365.0 / effective_days), APY_CAP_PCT))

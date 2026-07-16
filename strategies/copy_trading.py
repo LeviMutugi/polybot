@@ -16,9 +16,10 @@ from services.gas_tracker import gas_tracker
 
 _log = logging.getLogger(__name__)
 
-# Polymarket CTF (Conditional Token Framework) contract on Polygon
-CTF_CONTRACT = "0x4d97a65909e33db4117906108022421041695427"
-# TransferSingle topic
+# Polymarket CTF (Conditional Token Framework) contract on Polygon (canonical Gnosis CTF)
+CTF_CONTRACT = "0x4D97DCd97eC945f40CF65F87097CAe16E4bb2830"
+# TransferSingle(address operator, address from, address to, uint256 id, uint256 value)
+# topics layout: [signature, operator, from, to]
 TRANSFER_SINGLE_TOPIC = "0xc3d58168c5ae7397731d063d5bbf3d65785442f3484c048b909b5ffc0217f254"
 
 class LeaderboardCopyTradingStrategy(BaseStrategy):
@@ -69,18 +70,19 @@ class LeaderboardCopyTradingStrategy(BaseStrategy):
         for wallet in target_wallets:
             wallet_addr = w3.to_checksum_address(wallet)
             try:
-                # Query TransferSingle logs where the wallet is the recipient (signifying a buy/mint)
-                # Topic 2 contains the recipient address padded
+                # Query TransferSingle logs where the wallet is the RECIPIENT (a buy/mint).
+                # Recipient ('to') is the 3rd indexed param => topics[3].
+                # (Filtering topics[2] would match transfers FROM the wallet, i.e. sells.)
                 recipient_topic = "0x" + wallet_addr[2:].lower().zfill(64)
-                
+
                 # Fetch logs synchronously inside executor to prevent blocking
                 logs = await asyncio.get_running_loop().run_in_executor(
                     None,
                     lambda: w3.eth.get_logs({
                         "fromBlock": start_block,
                         "toBlock": latest_block,
-                        "address": CTF_CONTRACT,
-                        "topics": [TRANSFER_SINGLE_TOPIC, None, recipient_topic]
+                        "address": w3.to_checksum_address(CTF_CONTRACT),
+                        "topics": [TRANSFER_SINGLE_TOPIC, None, None, recipient_topic]
                     })
                 )
                 
@@ -90,6 +92,9 @@ class LeaderboardCopyTradingStrategy(BaseStrategy):
                     if tx_hash in self._seen_tx_hashes:
                         continue
                     self._seen_tx_hashes.add(tx_hash)
+                    if len(self._seen_tx_hashes) > 10000:
+                        # Bound memory: drop roughly half the dedup cache
+                        self._seen_tx_hashes = set(list(self._seen_tx_hashes)[5000:])
                     # Parse token ID from log data/topics
                     # For TransferSingle, topics are: [Event Signature, Operator, From, To]
                     # Data contains: [ID, Value]
@@ -126,9 +131,11 @@ class LeaderboardCopyTradingStrategy(BaseStrategy):
 
                             suggested_usdc = max(0.50, balance * max_pos_pct)
                             
-                            # Walk book depth
+                            # Walk book depth — skip if not fillable within tolerance
+                            from strategies.base import is_fillable
+                            max_slippage = await cfg.get_typed("poly_yield.max_slippage_pct", float, 1.5)
                             exec_data = await calculate_execution_price(token_id_str, suggested_usdc, side="buy", http_client=http_client)
-                            if "error" in exec_data:
+                            if not is_fillable(exec_data, max_slippage):
                                 continue
 
                             real_price = exec_data["price"]

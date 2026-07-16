@@ -835,7 +835,7 @@
                         </thead>
                         <tbody id="positionsBody">
                             <tr>
-                                <td colspan="7" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td>
+                                <td colspan="8" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -1089,7 +1089,9 @@
                 if (statusEl) statusEl.innerText = `● Scan #${msg.scan_count} — ${msg.opps_found} opps`;
             }
             else if (msg.type === "opportunity_update") {
-                fetchOpportunities();
+                // Each scan broadcasts one update per opportunity — debounce so a scan
+                // with 50 finds doesn't trigger 50 refetches
+                debouncedFetchOpportunities();
             }
             else if (msg.type === "position_opened" || msg.type === "position_settled") {
                 fetchPositions();
@@ -1103,7 +1105,14 @@
         let currentWalletBalance = 0;
         let activeOpportunities = [];
         let processedOppCache = [];
+        let renderedOpps = [];   // opportunities currently rendered, indexed by row
         let currentSort = { col: null, dir: 'asc' };
+
+        let _oppFetchTimer = null;
+        function debouncedFetchOpportunities() {
+            clearTimeout(_oppFetchTimer);
+            _oppFetchTimer = setTimeout(fetchOpportunities, 1500);
+        }
 
         function toggleSort(col) {
             if (currentSort.col === col) {
@@ -1230,46 +1239,52 @@
                 return;
             }
 
-            tbody.innerHTML = filtered.map(item => {
+            renderedOpps = filtered.map(item => item.original);
+
+            tbody.innerHTML = filtered.map((item, idx) => {
                 const opp = item.original;
                 let sizeText = `$${opp.suggested_usdc || '0'}`;
                 if (currentWalletBalance > 0 && opp.suggested_usdc) {
                     const pct = ((opp.suggested_usdc / currentWalletBalance) * 100).toFixed(1);
                     sizeText += ` <br><span style="font-size:10px; color:var(--text-secondary);">(${pct}%)</span>`;
                 }
+                const isManual = opp.exec_mode === 'manual';
+                // NOTE: all interactive handlers are index-based lookups into renderedOpps —
+                // inlining titles/ids into onclick attributes breaks on quotes/apostrophes.
+                const execBtn = isManual
+                    ? `<button class="btn" disabled title="This strategy is in MANUAL mode: follow the instructions, or switch it to semi/auto in the Bot Strategy Manager." style="padding:6px 12px; font-size:11px; opacity:0.45; cursor:not-allowed;">Manual Only</button>`
+                    : `<button class="btn btn-emerald" id="exec_${idx}" onclick="executeTradeByIdx(${idx}, event)" style="padding:6px 12px; font-size:11px;">Execute</button>`;
                 return `
-                    <tr onclick="toggleOppDetails('${opp.id}', '${opp.token_id || ''}', '${escapeHtml(opp.market_title || '')}')" style="cursor:pointer;">
+                    <tr onclick="toggleOppDetailsByIdx(${idx})" style="cursor:pointer;">
                         <td><span class="badge ${getRiskBadge(opp.risk_level)}">${formatStrategyName(opp.strategy)}</span></td>
                         <td style="max-width:300px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(opp.market_title || '')}">${escapeHtml(opp.market_title || '')}</td>
-                        <td><span style="color:var(--cyber-emerald); font-weight:600;">${opp.outcome || ''}</span></td>
+                        <td><span style="color:var(--cyber-emerald); font-weight:600;">${escapeHtml(opp.outcome || '')}</span></td>
                         <td>${opp.implied_prob != null ? opp.implied_prob + '%' : 'N/A'}</td>
                         <td><span style="color:var(--cyber-emerald); font-weight:600;">${opp.annualized_apy != null ? opp.annualized_apy + '%' : 'N/A'}</span>${opp.days_to_expiry != null && opp.days_to_expiry < 7 ? '<br><span style="font-size:10px;color:var(--alert-orange)">short-term</span>' : ''}</td>
                         <td>${sizeText}</td>
-                        <td>
-                            <button class="btn btn-emerald" id="exec_${opp.id}" onclick="executeTrade('${opp.id}', event)" style="padding:6px 12px; font-size:11px;">${opp.exec_mode === 'manual' ? 'Manual Only' : 'Execute'}</button>
-                        </td>
+                        <td>${execBtn}</td>
                     </tr>
-                    <tr id="details_${opp.id}" style="display:none; background: rgba(255,255,255,0.015);">
+                    <tr id="details_${idx}" data-opp-id="${escapeHtml(opp.id || '')}" style="display:none; background: rgba(255,255,255,0.015);">
                         <td colspan="7" style="padding: 16px 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
                             <div style="display:flex; justify-content:space-between; gap:40px; align-items:center;">
                                 <div style="display:flex; flex-direction:column; gap:8px; font-size:12px; flex:1;">
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span style="color:var(--text-secondary); width:80px; font-weight:600;">Market ID:</span>
-                                        <code style="background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px; color:#b3c5ff; font-family:monospace; font-size:11px;">${opp.market_id || 'N/A'}</code>
-                                        <button class="btn" onclick="copyText('${opp.market_id || ''}', event)" style="padding:2px 6px; font-size:10px; background:rgba(255,255,255,0.05);">Copy</button>
+                                        <code style="background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px; color:#b3c5ff; font-family:monospace; font-size:11px;">${escapeHtml(opp.market_id || 'N/A')}</code>
+                                        <button class="btn" onclick="copyOppField(${idx}, 'market_id', event)" style="padding:2px 6px; font-size:10px; background:rgba(255,255,255,0.05);">Copy</button>
                                     </div>
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span style="color:var(--text-secondary); width:80px; font-weight:600;">Token ID:</span>
-                                        <code style="background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px; color:#b3c5ff; font-family:monospace; font-size:11px;">${opp.token_id || 'N/A'}</code>
-                                        <button class="btn" onclick="copyText('${opp.token_id || ''}', event)" style="padding:2px 6px; font-size:10px; background:rgba(255,255,255,0.05);">Copy</button>
+                                        <code style="background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px; color:#b3c5ff; font-family:monospace; font-size:11px;">${escapeHtml(opp.token_id || 'N/A')}</code>
+                                        <button class="btn" onclick="copyOppField(${idx}, 'token_id', event)" style="padding:2px 6px; font-size:10px; background:rgba(255,255,255,0.05);">Copy</button>
                                     </div>
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span style="color:var(--text-secondary); width:80px; font-weight:600;">Market Link:</span>
-                                        <a href="${opp.market_url || 'https://polymarket.com/market/' + opp.market_id}" target="_blank" style="color:var(--cyber-emerald); text-decoration:none;" onclick="event.stopPropagation();">Open in Polymarket ↗</a>
+                                        <a href="${escapeHtml(opp.market_url || ('https://polymarket.com/market/' + (opp.market_id || '')))}" target="_blank" style="color:var(--cyber-emerald); text-decoration:none;" onclick="event.stopPropagation();">Open in Polymarket ↗</a>
                                     </div>
                                 </div>
                                 <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
-                                    <button class="btn btn-emerald" onclick="autofillManualTrade('${opp.market_id || ''}', '${opp.token_id || ''}', '${escapeHtml(opp.market_title || '')}', '${opp.outcome || 'YES'}', ${opp.entry_price || 0.50}, event)" style="padding:6px 12px; font-size:11px;">
+                                    <button class="btn btn-emerald" onclick="autofillFromIdx(${idx}, event)" style="padding:6px 12px; font-size:11px;">
                                         ⚡ Auto-Fill Manual Trade Form
                                     </button>
                                 </div>
@@ -1281,27 +1296,28 @@
 
             // Restore expanded state if still exists in the data
             if (activeExpandedOppId) {
-                const el = document.getElementById(`details_${activeExpandedOppId}`);
+                const el = document.querySelector(`[data-opp-id="${CSS.escape(activeExpandedOppId)}"]`);
                 if (el) {
                     el.style.display = "table-row";
                 }
             }
         }
 
-        function toggleOppDetails(oppId, tokenId, marketTitle) {
-            const el = document.getElementById(`details_${oppId}`);
-            if (!el) return;
+        function toggleOppDetailsByIdx(idx) {
+            const opp = renderedOpps[idx];
+            const el = document.getElementById(`details_${idx}`);
+            if (!el || !opp) return;
             const isVisible = el.style.display !== "none";
-            
+
             // Collapse all other detail rows first (to keep table clean)
             const detailRows = document.querySelectorAll("[id^='details_']");
             detailRows.forEach(row => { row.style.display = "none"; });
-            
+
             // Toggle clicked row
             if (!isVisible) {
                 el.style.display = "table-row";
-                activeExpandedOppId = oppId;
-                loadOrderBook(tokenId, marketTitle);
+                activeExpandedOppId = opp.id;
+                loadOrderBook(opp.token_id, opp.market_title || '');
             } else {
                 activeExpandedOppId = null;
             }
@@ -1310,7 +1326,7 @@
         function copyText(text, event) {
             event.stopPropagation();
             if (!text) return;
-            navigator.clipboard.writeText(text).then(() => {
+            navigator.clipboard.writeText(String(text)).then(() => {
                 const btn = event.target;
                 const originalText = btn.innerText;
                 btn.innerText = "Copied!";
@@ -1324,13 +1340,24 @@
             });
         }
 
+        function copyOppField(idx, field, event) {
+            const opp = renderedOpps[idx];
+            copyText(opp ? (opp[field] || '') : '', event);
+        }
+
+        function autofillFromIdx(idx, event) {
+            const opp = renderedOpps[idx];
+            if (!opp) return;
+            autofillManualTrade(opp.market_id || '', opp.token_id || '', opp.market_title || '', opp.outcome || 'YES', opp.entry_price || 0.50, event);
+        }
+
         function autofillManualTrade(marketId, tokenId, marketTitle, outcome, price, event) {
             event.stopPropagation();
-            
+
             document.getElementById("manualMarketId").value = marketId;
             document.getElementById("manualTokenId").value = tokenId && tokenId !== 'None' ? tokenId : '';
             document.getElementById("manualMarketTitle").value = marketTitle;
-            
+
             const outcomeSelect = document.getElementById("manualOutcome");
             if (outcomeSelect) {
                 const upperOutcome = outcome.toUpperCase();
@@ -1340,7 +1367,7 @@
                     outcomeSelect.value = upperOutcome.includes("YES") ? "YES" : "NO";
                 }
             }
-            
+
             document.getElementById("manualPrice").value = price || 0.50;
             
             logEvent(`[SYSTEM] Auto-filled manual trade form for: "${marketTitle}"`);
@@ -1365,7 +1392,7 @@
                 const tbody = document.getElementById("positionsBody");
 
                 if (data.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td></tr>`;
                     return;
                 }
 
@@ -1373,13 +1400,13 @@
                     <tr>
                         <td><span class="badge ${getRiskBadge(pos.risk_level)}">${formatStrategyName(pos.strategy)}</span></td>
                         <td style="max-width:300px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(pos.market_title || '')}">${escapeHtml(pos.market_title || '')}</td>
-                        <td><span style="color:var(--cyber-emerald);">${pos.outcome || ''}</span></td>
+                        <td><span style="color:var(--cyber-emerald);">${escapeHtml(pos.outcome || '')}</span></td>
                         <td>$${(pos.cost_usdc || 0).toFixed(2)}</td>
                         <td>$${(pos.entry_price || 0).toFixed(4)}</td>
                         <td><span style="text-transform:uppercase; font-size:11px; font-weight:600; color: ${pos.mode==='live' ? 'var(--hot-pink)' : 'var(--text-secondary)'}">${pos.mode || 'paper'}</span></td>
                         <td><span style="color: ${pos.status === 'open' ? 'var(--alert-orange)' : pos.status === 'won' ? 'var(--cyber-emerald)' : 'var(--hot-pink)'}; font-weight:600; text-transform:capitalize;">${pos.status}${pos.realized_pnl != null && pos.status !== 'open' ? ' (' + (pos.realized_pnl >= 0 ? '+' : '') + '$' + pos.realized_pnl.toFixed(2) + ')' : ''}</span></td>
                         <td>
-                            ${pos.status === 'open' ? `<button class="btn" style="background:linear-gradient(135deg, var(--hot-pink), #cc005f); padding:4px 8px; font-size:11px;" onclick="exitPositionPrompt('${pos.id}', ${pos.entry_price})">Exit</button>` : `<span style="color:var(--text-secondary); font-size:11px;">—</span>`}
+                            ${pos.status === 'open' ? `<button class="btn" style="background:linear-gradient(135deg, var(--hot-pink), #cc005f); padding:4px 8px; font-size:11px;" onclick="exitPositionPrompt('${pos.id}', ${pos.entry_price || 0.5})">Exit</button>` : `<span style="color:var(--text-secondary); font-size:11px;">—</span>`}
                         </td>
                     </tr>
                 `).join("");
@@ -1452,8 +1479,10 @@
                 const bidsBody = document.getElementById("obBidsBody");
                 const asksBody = document.getElementById("obAsksBody");
 
-                const bids = data.bids || [];
-                const asks = data.asks || [];
+                // Normalize to best-price-first: the CLOB API returns bids ascending and
+                // asks descending (best price LAST), so an unsorted slice shows the worst levels
+                const bids = (data.bids || []).slice().sort((a, b) => parseFloat(b.price) - parseFloat(a.price));
+                const asks = (data.asks || []).slice().sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
 
                 bidsBody.innerHTML = bids.slice(0, 8).map(b => `
                     <div class="ob-row">
@@ -1476,21 +1505,35 @@
             }
         }
 
-        // Execute manually
-        async function executeTrade(oppId, event) {
+        // Execute manually (semi-auto approval)
+        async function executeTradeByIdx(idx, event) {
             event.stopPropagation();
-            const btn = document.getElementById(`exec_${oppId}`);
+            const opp = renderedOpps[idx];
+            if (!opp) return;
+
+            // Safety: explicit confirmation whenever real money is at stake
+            const isLive = document.getElementById("modeSwitch")?.checked;
+            if (isLive) {
+                const ok = await CustomDialog.confirm(
+                    `LIVE MODE — this will spend REAL USDC.\n\nMarket: ${opp.market_title || opp.id}\nOutcome: ${opp.outcome || ''}\nSize: $${opp.suggested_usdc || '?'} @ $${opp.entry_price || '?'}\n\nProceed?`,
+                    'Confirm Live Trade',
+                    '🚨'
+                );
+                if (!ok) return;
+            }
+
+            const btn = document.getElementById(`exec_${idx}`);
             if (btn) {
                 btn.disabled = true;
                 btn.innerText = 'Executing...';
                 btn.style.opacity = '0.5';
             }
-            logEvent(`[ENGINE] Manually executing opportunity ${oppId}...`);
+            logEvent(`[ENGINE] Manually executing opportunity ${opp.id}...`);
             try {
-                const r = await fetch(`/api/poly-yield/execute/${oppId}`, { method: "POST" });
+                const r = await fetch(`/api/poly-yield/execute/${encodeURIComponent(opp.id)}`, { method: "POST" });
                 const res = await r.json();
                 if (r.ok) {
-                    logEvent(`[ENGINE] Execution SUCCESS: ${oppId}`);
+                    logEvent(`[ENGINE] Execution SUCCESS: ${opp.id}`);
                     if (btn) { btn.innerText = '✓ Done'; btn.style.background = 'var(--cyber-emerald)'; }
                     fetchPositions();
                     fetchStats();
@@ -1498,6 +1541,8 @@
                 } else {
                     logEvent(`[ENGINE] Execution DENIED: ${res.detail || res.error || "Error"}`);
                     if (btn) { btn.innerText = 'Failed'; btn.style.background = 'var(--hot-pink)'; }
+                    // Denials usually mean stale/moved prices — refresh the table
+                    debouncedFetchOpportunities();
                 }
             } catch (e) {
                 logEvent(`[ENGINE] Execution failure: ${e}`);
@@ -1610,8 +1655,14 @@
             let targetChainId = 137;
             if (currentText.includes("MAINNET")) {
                 targetChainId = 80002;
+                const ok = await CustomDialog.confirm(
+                    'Switch to AMOY TESTNET?\n\nNote: market data still comes from the mainnet Gamma API — testnet is only useful for testing CLOB order plumbing, NOT for validating strategies. Opportunities shown will not exist on testnet.',
+                    'Testnet Warning',
+                    '⚠️'
+                );
+                if (!ok) return;
             }
-            
+
             logEvent(`[SYSTEM] Switched Polygon network to: Chain ${targetChainId}`);
             updateChainIndicator(targetChainId);
             
@@ -1706,8 +1757,21 @@
                 's4_corr': 'S4 Corr Arb',
                 's5_sub_event': 'S5 Sub-Event',
                 's6_longshot': 'S6 Longshot',
+                's8_late_stage': 'S8 Late Stage',
+                's9_stablecoin_peg': 'S9 Stable Peg',
+                's10_oracle': 'S10 Oracle',
+                's11_overreaction': 'S11 Overreact',
+                's12_momentum': 'S12 Momentum',
+                's13_sentiment': 'S13 Sentiment',
+                's14_macro_corr': 'S14 Macro',
+                's15_theta': 'S15 Theta',
+                's16_poll_drift': 'S16 Poll Drift',
+                's17_sniper': 'S17 Sniper',
+                's18_straddle': 'S18 Straddle',
+                's19_longshot_yes': 'S19 Longshot YES',
                 'favorite_compounding': 'Fav Compound',
-                'copy_trading': 'Copy Trade'
+                'copy_trading': 'Copy Trade',
+                'manual': 'Manual'
             };
             return names[key] || key;
         }
@@ -1976,7 +2040,16 @@
                     { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
                 ]
             },
-            { key: 's8_late_stage', label: 'S8 Late Stage Yield', params: [] },
+            {
+                key: 's8_late_stage',
+                label: 'S8 Late Stage Yield',
+                params: [
+                    { key: 'min_price', label: 'Min Price', type: 'number', step: '0.005', unit: 'USDC' },
+                    { key: 'max_days_left', label: 'Max Days Left', type: 'number', step: '0.5', unit: 'days' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
             { key: 's9_stablecoin_peg', label: 'S9 Stablecoin Peg Arb', params: [] },
             { key: 's10_oracle', label: 'S10 Oracle Discrepancy', params: [] },
             { key: 's11_overreaction', label: 'S11 Overreaction Scalp', params: [] },

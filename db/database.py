@@ -223,10 +223,10 @@ def init_db():
             ("s1_novelty.exec_mode", "semi"),
             ("s2_split.exec_mode", "semi"),
             ("s3_buy_all.exec_mode", "auto"),
-            ("s4_corr.exec_mode", "auto"),
+            ("s4_corr.exec_mode", "semi"),
             ("s5_sub_event.exec_mode", "manual"),
             ("s6_longshot.exec_mode", "auto"),
-            ("s8_late_stage.exec_mode", "auto"),
+            ("s8_late_stage.exec_mode", "semi"),
             ("s9_stablecoin_peg.exec_mode", "auto"),
             ("s10_oracle.exec_mode", "semi"),
             ("s11_overreaction.exec_mode", "semi"),
@@ -256,6 +256,10 @@ def init_db():
             ("s6_longshot.max_yes_price", "0.08"),
             ("s6_longshot.max_positions", "10"),
             ("s6_longshot.position_pct", "0.02"),
+            ("s8_late_stage.min_price", "0.98"),
+            ("s8_late_stage.max_days_left", "3.0"),
+            ("s8_late_stage.max_position_pct", "0.05"),
+            ("s8_late_stage.min_apy", "3.0"),
             ("favorite_compounding.min_yes_price", "0.95"),
             ("favorite_compounding.max_days_left", "7.0"),
             ("favorite_compounding.max_position_pct", "0.10"),
@@ -279,4 +283,17 @@ def init_db():
                 "INSERT OR IGNORE INTO system_config (key, value) VALUES (?, ?)",
                 [k, v]
             )
+
+        # One-time safety migration (v2): S4/S8 shipped with exec_mode 'auto' before
+        # their execution paths were hardened — existing databases keep seeded values,
+        # so force these to 'semi' once. Users can re-enable auto deliberately in the UI.
+        row = conn.execute("SELECT value FROM system_config WHERE key = 'schema_version'").fetchone()
+        current_version = int(row["value"]) if row else 1
+        if current_version < 2:
+            conn.execute(
+                "UPDATE system_config SET value = 'semi', updated_at = datetime('now') "
+                "WHERE key IN ('s4_corr.exec_mode', 's8_late_stage.exec_mode') AND value = 'auto'"
+            )
+            conn.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES ('schema_version', '2')")
+
         conn.commit()

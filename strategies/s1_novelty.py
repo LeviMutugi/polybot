@@ -67,9 +67,11 @@ class NoveltyYieldStrategy(BaseStrategy):
                 if not token_id_no:
                     continue
 
-                # Walk book L2 depth
+                # Walk book L2 depth — skip anything that can't actually fill within tolerance
+                from strategies.base import is_fillable
+                max_slippage = await cfg.get_typed("poly_yield.max_slippage_pct", float, 1.5)
                 exec_data = await calculate_execution_price(token_id_no, suggested_usdc, side="buy", http_client=http_client)
-                if "error" in exec_data:
+                if not is_fillable(exec_data, max_slippage):
                     continue
 
                 real_no_price = exec_data["price"]
@@ -104,8 +106,10 @@ class NoveltyYieldStrategy(BaseStrategy):
                     "entry_price": round(real_no_price, 4),
                     "yes_price": round(yes_price, 4),
                     "no_price": round(no_price, 4),
-                    "implied_prob": round(real_no_price * 100, 2), # Probability of success = prob of NO
-                    "est_true_prob": round(est_true_no_prob * 100, 2),
+                    "implied_prob": round(real_no_price * 100, 2), # Probability of success = prob of NO (display, %)
+                    # NOTE: est_true_prob is a FRACTION (0-1) — the Kelly sizer compares it
+                    # directly against entry_price. Passing a percent here silently maxes out sizing.
+                    "est_true_prob": round(est_true_no_prob, 4),
                     "slippage_bps": round(slippage * 100, 2),
                     "annualized_apy": round(real_apy, 2),
                     "profit_pct": round(net_hold_yield * 100, 2),

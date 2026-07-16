@@ -129,31 +129,44 @@ class PolyYieldEngine:
         # Run scans across all registered strategies
         strategies = get_all_strategies()
         all_opps = []
+        scanned_ids: dict = {}
 
         for strat in strategies:
             # Check if strategy is enabled in DB
             strat_enabled = await cfg.get_typed(f"{strat.key}.enabled", bool, True)
             if not strat_enabled:
+                # Strategy disabled: anything it previously found is no longer maintained
+                scanned_ids[strat.key] = set()
                 continue
 
             try:
                 opps = await strat.scan(markets, balance, self._http)
+                found_ids = set()
                 for opp in opps:
+                    opp.setdefault("risk_level", strat.risk_level)
                     all_opps.append(opp)
+                    found_ids.add(opp.get("id"))
                     # Upsert opportunity to DB (for UI display)
                     await self._upsert_opportunity(opp)
+                scanned_ids[strat.key] = found_ids
             except Exception as ex:
                 _log.error("Strategy %s scan failed: %s", strat.key, ex)
-                
+
+        # Opportunities not re-confirmed by this scan are stale — never show or execute them
+        try:
+            await asyncio.to_thread(self._mark_missing_stale, scanned_ids)
+        except Exception as ex:
+            _log.error("Failed to mark stale opportunities: %s", ex)
+
         # Filter for auto-execution and rank by priority metric
         # EV = (Return / Risk) * Prob of Success. We use expected_value_usdc or annualized_apy as proxy
         auto_opps = [opp for opp in all_opps if opp.get("exec_mode") == "auto" and not self._killswitch]
-        
+
         # Sort opportunities (descending) prioritizing expected value or APY if EV not available
         auto_opps.sort(key=lambda x: (
-            x.get("expected_value_usdc", 0) > 0, # Has positive EV calculation
-            x.get("expected_value_usdc", 0),     # The EV amount itself
-            x.get("annualized_apy", 0)           # Fallback to APY
+            (x.get("expected_value_usdc") or 0) > 0, # Has positive EV calculation
+            (x.get("expected_value_usdc") or 0),     # The EV amount itself
+            (x.get("annualized_apy") or 0)           # Fallback to APY
         ), reverse=True)
         
         # Execute top-down
@@ -190,6 +203,33 @@ class PolyYieldEngine:
     async def _get_wallet_balance(self) -> float:
         return await portfolio_allocator._get_wallet_balance()
 
+    def _mark_missing_stale(self, scanned_ids: dict):
+        """Mark previously-open opportunities that were NOT found in this scan as stale,
+        and purge old non-executed rows so the UI never shows dead entries."""
+        conn = get_sqlite()
+        with _sqlite_lock:
+            for strat_key, ids in scanned_ids.items():
+                ids = {i for i in ids if i}
+                if ids:
+                    placeholders = ",".join("?" * len(ids))
+                    conn.execute(
+                        f"UPDATE poly_yield_opportunities SET status = 'stale' "
+                        f"WHERE strategy = ? AND status = 'open' AND id NOT IN ({placeholders})",
+                        [strat_key, *ids]
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE poly_yield_opportunities SET status = 'stale' "
+                        "WHERE strategy = ? AND status = 'open'",
+                        [strat_key]
+                    )
+            # Purge dead rows after a day; keep 'executed' rows for position audit trail
+            conn.execute(
+                "DELETE FROM poly_yield_opportunities "
+                "WHERE status IN ('open', 'stale') AND updated_at < datetime('now', '-1 day')"
+            )
+            conn.commit()
+
     async def _upsert_opportunity(self, opp: dict):
         try:
             conn = get_sqlite()
@@ -197,14 +237,15 @@ class PolyYieldEngine:
                 conn.execute("""
                     INSERT OR REPLACE INTO poly_yield_opportunities
                     (id, strategy, risk_level, execution_type, market_type, reward_score,
-                     slippage_bps, market_id, market_title, market_url, outcome, entry_price,
+                     slippage_bps, market_id, market_title, market_url, token_id, outcome, entry_price,
                      implied_prob, yes_price, no_price, annualized_apy, profit_pct, days_to_expiry,
                      action, exec_mode, suggested_usdc, status, notes, instructions, legs, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
                 """, [
                     opp.get("id"), opp.get("strategy"), opp.get("risk_level"), opp.get("exec_mode"),
                     opp.get("market_type", "Binary"), opp.get("reward_score", 0.0), opp.get("slippage_bps", 0.0),
-                    opp.get("market_id"), opp.get("market_title"), opp.get("market_url"), opp.get("outcome"),
+                    opp.get("market_id"), opp.get("market_title"), opp.get("market_url"), opp.get("token_id"),
+                    opp.get("outcome"),
                     opp.get("entry_price"), opp.get("implied_prob"), opp.get("yes_price"), opp.get("no_price"),
                     opp.get("annualized_apy"), opp.get("profit_pct"), opp.get("days_to_expiry"),
                     opp.get("action"), opp.get("exec_mode"), opp.get("suggested_usdc"),
@@ -216,27 +257,75 @@ class PolyYieldEngine:
         except Exception as e:
             _log.error("Failed to upsert opportunity: %s", e)
 
+    async def _opportunity_freshness_error(self, opp: dict) -> str:
+        """Return an error string if the stored opportunity is stale or already consumed, else None.
+        Prevents executing against prices from an old scan."""
+        opp_id = opp.get("id")
+        if not opp_id:
+            return "Opportunity has no id"
+        conn = get_sqlite()
+        with _sqlite_lock:
+            row = conn.execute(
+                "SELECT status, updated_at FROM poly_yield_opportunities WHERE id = ?", [opp_id]
+            ).fetchone()
+        if not row:
+            return None  # not persisted yet (came straight from the scanner) — inherently fresh
+        if row["status"] != "open":
+            return f"Opportunity is no longer available (status: {row['status']}). Wait for the next scan."
+        interval = await cfg.get_typed("poly_yield.scan_interval_s", int, 120)
+        max_age_s = max(300, interval * 3)
+        try:
+            updated = datetime.strptime(str(row["updated_at"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            age_s = (datetime.now(timezone.utc) - updated).total_seconds()
+            if age_s > max_age_s:
+                with _sqlite_lock:
+                    conn.execute("UPDATE poly_yield_opportunities SET status = 'stale' WHERE id = ?", [opp_id])
+                    conn.commit()
+                return f"Opportunity data is stale ({int(age_s)}s old, max {max_age_s}s). Wait for the next scan."
+        except (ValueError, TypeError):
+            pass
+        return None
+
     async def execute_opportunity(self, opp: dict) -> dict:
         """Centralized execution entry point with pre-flight, parallel dispatch, and rollback guards."""
         opp_id = opp.get("id")
         strat_key = opp.get("strategy")
         market_id = opp.get("market_id")
-        suggested_usdc = float(opp.get("suggested_usdc", 1.0))
-        
-        # Idempotency guard: check if opportunity already has an open position
-        conn = get_sqlite()
-        with _sqlite_lock:
-            existing = conn.execute(
-                "SELECT id FROM poly_yield_positions WHERE opportunity_id = ? AND status = 'open'",
-                [opp_id]
-            ).fetchone()
-        if existing:
-            return {"success": False, "error": "Opportunity already has an open position (duplicate)"}
+        is_manual_trade = strat_key in ("manual", "manual_trade")
+        try:
+            suggested_usdc = float(opp.get("suggested_usdc") or 0.0)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "Invalid suggested_usdc"}
+
+        if self._killswitch:
+            return {"success": False, "error": "Killswitch is active — trading is frozen pending manual review"}
+
+        # Strategy-level 'manual' exec mode = instructions only, never executable through the engine.
+        # (The Manual Trade panel uses the dedicated 'manual' strategy and is exempt.)
+        if not is_manual_trade:
+            strat_exec_mode = await cfg.get_typed(f"{strat_key}.exec_mode", str, "manual")
+            if strat_exec_mode == "manual":
+                return {"success": False, "error": f"Strategy {strat_key} is in MANUAL mode (instructions only). Switch it to semi or auto to allow execution."}
+
+        # Freshness guard — never execute against data from an old scan
+        freshness_error = await self._opportunity_freshness_error(opp)
+        if freshness_error:
+            return {"success": False, "error": freshness_error}
 
         # 1. Obtain market lock to prevent competing orders on the same market
         lock = await portfolio_allocator.get_market_lock(market_id)
 
         async with lock:
+            # Idempotency guard (inside the lock so concurrent executes serialize correctly)
+            conn = get_sqlite()
+            with _sqlite_lock:
+                existing = conn.execute(
+                    "SELECT id FROM poly_yield_positions WHERE opportunity_id = ? AND status = 'open'",
+                    [opp_id]
+                ).fetchone()
+            if existing:
+                return {"success": False, "error": "Opportunity already has an open position (duplicate)"}
+
             # 2. Check risk & money allocation (Kelly sizing / drawdown limit check)
             from services.portfolio_allocator import AllocationDeniedError
             try:
@@ -252,139 +341,227 @@ class PolyYieldEngine:
 
             # Update sizing in opportunity
             opp["suggested_usdc"] = allocated_usdc
-            
-            # Check mode (paper vs live)
+
             mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
-            if mode == "paper":
-                # Debit paper wallet BEFORE recording position
-                from services.wallet import wallet_service, InsufficientFundsError, DuplicateTransactionError
-                idem_key = f"open_{opp_id}"
-                try:
-                    wallet_service.debit("paper", allocated_usdc, "trade_open",
-                                         position_id=None,
-                                         description=f"Buy: {opp.get('market_title', '')[:80]}",
-                                         idempotency_key=idem_key)
-                except InsufficientFundsError as e:
-                    return {"success": False, "error": str(e)}
-                except DuplicateTransactionError:
-                    return {"success": False, "error": "Trade already executed (duplicate)"}
+            max_slippage = await cfg.get_typed("poly_yield.max_slippage_pct", float, 1.5)
 
-                # Simulated execution success
-                shares = allocated_usdc / opp["entry_price"]
-                await self._record_position(opp, shares, allocated_usdc, "paper_order_id")
-                await alert.send(f"Paper trade executed: {opp['market_title']} -> {opp['outcome']} for ${allocated_usdc} USDC", level="success")
-                return {"success": True, "mode": "paper"}
-
-            if not self._clob_client:
-                return {"success": False, "error": "CLOB client not configured for live trading"}
-
-            # 3. Handle multi-leg strategies (S3, S5 basket, etc.) with pre-flight walks & parallel dispatch
-            legs = opp.get("legs", [])
+            legs = opp.get("legs") or []
             if legs and isinstance(legs, list):
-                # Multi-leg S3 / S5 Buy-All Basket
-                preflight_ok = True
-                max_slippage = await cfg.get_typed("poly_yield.max_slippage_pct", float, 1.5)
-                
-                # Pre-flight check
-                for leg in legs:
-                    token_id = leg.get("token_id")
-                    leg_stake = (leg.get("price", 0.3) / opp["entry_price"]) * allocated_usdc
-                    leg["stake_usdc"] = round(leg_stake, 2)
-                    
-                    # Walk book for each leg
-                    from strategies.base import calculate_execution_price
-                    walk = await calculate_execution_price(token_id, leg_stake, side="buy", http_client=self._http)
-                    if "error" in walk or walk.get("slippage", 0) > max_slippage:
-                        preflight_ok = False
-                        _log.warning("[Engine] Pre-flight aborted. Leg %s failed slippage/liquidity check.", leg.get("outcome"))
-                        break
-                
-                if not preflight_ok:
-                    return {"success": False, "error": "Multi-leg pre-flight check failed"}
+                return await self._execute_multi_leg(opp, legs, allocated_usdc, mode, max_slippage)
+            return await self._execute_single_leg(opp, allocated_usdc, mode, max_slippage, is_manual_trade)
 
-                # Parallel dispatch
-                tasks = [self._place_live_order(leg["token_id"], leg["stake_usdc"], leg["price"]) for leg in legs]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+    def _paper_open(self, allocated_usdc: float, description: str):
+        """Debit the paper wallet for a new position. Returns (pos_id, error)."""
+        from services.wallet import wallet_service, InsufficientFundsError
+        pos_id = f"pos_{uuid.uuid4().hex[:8]}"
+        try:
+            wallet_service.debit("paper", allocated_usdc, "trade_open",
+                                 position_id=pos_id,
+                                 description=description,
+                                 idempotency_key=f"open_{pos_id}")
+        except InsufficientFundsError as e:
+            return None, str(e)
+        except Exception as e:
+            return None, f"Paper wallet debit failed: {e}"
+        return pos_id, None
 
-                placed = [r for r in results if isinstance(r, dict) and r.get("success")]
-                failed = [r for r in results if isinstance(r, Exception) or (isinstance(r, dict) and not r.get("success"))]
+    def _paper_refund(self, pos_id: str, amount: float, reason: str):
+        """Refund a paper debit when position recording fails (money conservation)."""
+        try:
+            from services.wallet import wallet_service
+            wallet_service.credit("paper", amount, "trade_refund",
+                                  position_id=pos_id,
+                                  description=f"Refund: {reason}"[:120],
+                                  idempotency_key=f"refund_{pos_id}")
+        except Exception as e:
+            _log.error("CRITICAL: Paper refund failed for %s: %s", pos_id, e)
 
-                if failed:
-                    # Trigger rollback cancellation loop & Killswitch
-                    _log.critical("[Engine] Multi-leg partial fill detected! Rolling back placed legs.")
-                    self._killswitch = True
-                    await cfg.set_async("poly_yield.enabled", "false")
-                    
-                    for p in placed:
-                        try:
-                            self._clob_client.cancel(p["order_id"])
-                        except Exception as ce:
-                            _log.error("Failed to cancel leg order %s: %s", p["order_id"], ce)
+    async def _execute_multi_leg(self, opp: dict, legs: list, allocated_usdc: float, mode: str, max_slippage: float) -> dict:
+        """Multi-leg basket execution (S3 buy-all, S5 sub-event basket) with per-leg
+        live-book verification, price-drift guard, and partial-fill rollback."""
+        from strategies.base import calculate_execution_price, is_fillable
 
-                    await alert.send("CRITICAL: Multi-leg partial fill failed! Killswitch activated. Manual intervention required.", level="critical")
-                    return {"success": False, "error": "Partial fill occurred. Rolled back and activated system killswitch."}
+        try:
+            denom = sum(float(l.get("price") or 0) for l in legs)
+        except (TypeError, ValueError):
+            denom = 0.0
+        if denom <= 0:
+            return {"success": False, "error": "Invalid multi-leg prices"}
 
-                # Success - record total position
-                # Success - record total position
-                total_cost = sum(p.get("fill_cost", 0) for p in placed)
-                min_shares = min(p.get("fill_shares", 0) for p in placed) if placed else 0
-                order_ids_str = ",".join(p["order_id"] for p in placed)
-                await self._record_position(opp, min_shares, total_cost or allocated_usdc, order_ids_str, fill_price=opp.get("entry_price"))
-                await alert.send(f"Live Basket trade success: {opp['market_title']} for ${total_cost or allocated_usdc:.2f} USDC", level="success")
-                return {"success": True, "placed": len(placed)}
+        # Pre-flight: walk EVERY leg's live book, verify liquidity, slippage, and drift vs scan price
+        leg_fills = []
+        for leg in legs:
+            token_id = leg.get("token_id")
+            try:
+                leg_price = float(leg.get("price") or 0)
+            except (TypeError, ValueError):
+                leg_price = 0.0
+            if not token_id or leg_price <= 0:
+                return {"success": False, "error": f"Leg '{leg.get('outcome')}' missing token_id or price"}
 
+            leg_stake = (leg_price / denom) * allocated_usdc
+            leg["stake_usdc"] = round(leg_stake, 2)
+
+            walk = await calculate_execution_price(token_id, leg_stake, side="buy", http_client=self._http)
+            if not is_fillable(walk, max_slippage):
+                reason = walk.get("error") or walk.get("warning") or f"slippage {walk.get('slippage')}% > {max_slippage}%"
+                _log.warning("[Engine] Pre-flight aborted. Leg %s failed: %s", leg.get("outcome"), reason)
+                return {"success": False, "error": f"Pre-flight failed on leg '{leg.get('outcome')}': {reason}"}
+
+            drift_pct = abs(walk["price"] - leg_price) / leg_price * 100.0
+            if drift_pct > max_slippage:
+                return {"success": False,
+                        "error": f"Price moved on leg '{leg.get('outcome')}': ${leg_price:.4f} at scan vs ${walk['price']:.4f} now "
+                                 f"({drift_pct:.2f}% drift). Wait for the next scan."}
+            leg_fills.append({"leg": leg, "fill_price": walk["price"]})
+
+        if mode == "paper":
+            pos_id, err = self._paper_open(allocated_usdc, f"Buy basket: {opp.get('market_title', '')[:80]}")
+            if err:
+                return {"success": False, "error": err}
+            total_cost = 0.0
+            min_shares = None
+            for lf in leg_fills:
+                shares = lf["leg"]["stake_usdc"] / lf["fill_price"] if lf["fill_price"] > 0 else 0.0
+                total_cost += lf["leg"]["stake_usdc"]
+                min_shares = shares if min_shares is None else min(min_shares, shares)
+            try:
+                await self._record_position(opp, min_shares or 0.0, allocated_usdc, "paper_basket_order", fill_price=opp.get("entry_price"), pos_id=pos_id)
+            except Exception as e:
+                self._paper_refund(pos_id, allocated_usdc, "basket position record failed")
+                return {"success": False, "error": f"Failed to record position (funds refunded): {e}"}
+            await alert.send(f"Paper basket trade executed: {opp['market_title']} for ${allocated_usdc:.2f} USDC", level="success")
+            return {"success": True, "mode": "paper", "position_id": pos_id}
+
+        if not self._clob_client:
+            return {"success": False, "error": "CLOB client not configured for live trading"}
+
+        # Parallel dispatch at the verified current prices
+        tasks = [self._place_live_order(lf["leg"]["token_id"], lf["leg"]["stake_usdc"], lf["fill_price"]) for lf in leg_fills]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        placed = [r for r in results if isinstance(r, dict) and r.get("success")]
+        failed = [r for r in results if isinstance(r, Exception) or (isinstance(r, dict) and not r.get("success"))]
+
+        if failed:
+            # Trigger rollback cancellation loop & Killswitch
+            _log.critical("[Engine] Multi-leg partial fill detected! Rolling back placed legs.")
+            self._killswitch = True
+            await cfg.set_async("poly_yield.enabled", "false")
+
+            for p in placed:
+                order_id = p.get("order_id")
+                if not order_id:
+                    continue
+                try:
+                    await asyncio.to_thread(self._clob_client.cancel, order_id)
+                except Exception as ce:
+                    _log.error("Failed to cancel leg order %s: %s", order_id, ce)
+
+            await alert.send("CRITICAL: Multi-leg partial fill failed! Killswitch activated. Manual intervention required.", level="critical")
+            return {"success": False, "error": "Partial fill occurred. Rolled back and activated system killswitch."}
+
+        # Success - record total position
+        total_cost = sum(p.get("fill_cost", 0) for p in placed)
+        min_shares = min(p.get("fill_shares", 0) for p in placed) if placed else 0
+        order_ids_str = ",".join(str(p.get("order_id", "")) for p in placed)
+        await self._record_position(opp, min_shares, total_cost or allocated_usdc, order_ids_str, fill_price=opp.get("entry_price"))
+        await alert.send(f"Live Basket trade success: {opp['market_title']} for ${total_cost or allocated_usdc:.2f} USDC", level="success")
+        return {"success": True, "placed": len(placed)}
+
+    async def _execute_single_leg(self, opp: dict, allocated_usdc: float, mode: str, max_slippage: float, is_manual_trade: bool) -> dict:
+        """Single-leg execution with live price re-verification against the order book."""
+        strat_key = opp.get("strategy")
+        token_id = opp.get("token_id")
+        try:
+            entry_price = float(opp.get("entry_price") or 0)
+        except (TypeError, ValueError):
+            entry_price = 0.0
+        if not (0 < entry_price < 1):
+            return {"success": False, "error": f"Invalid entry price {entry_price} (must be between 0 and 1)"}
+
+        exec_price = entry_price
+        # Re-verify against the live book (skipped for manual trades: the user sets an explicit limit price)
+        if not is_manual_trade:
+            if not token_id:
+                return {"success": False, "error": "Opportunity is missing token_id — cannot verify live price before execution"}
+            from strategies.base import calculate_execution_price, is_fillable
+            walk = await calculate_execution_price(token_id, allocated_usdc, side="buy", http_client=self._http)
+            if not is_fillable(walk, max_slippage):
+                reason = walk.get("error") or walk.get("warning") or f"slippage {walk.get('slippage')}% > {max_slippage}%"
+                return {"success": False, "error": f"Live book check failed: {reason}"}
+            drift_pct = abs(walk["price"] - entry_price) / entry_price * 100.0
+            if drift_pct > max_slippage:
+                return {"success": False,
+                        "error": f"Price moved since scan: ${entry_price:.4f} → ${walk['price']:.4f} "
+                                 f"({drift_pct:.2f}% drift). Wait for the next scan."}
+            exec_price = walk["price"]
+            opp["entry_price"] = exec_price  # execute at the verified current price
+
+        if mode == "paper":
+            pos_id, err = self._paper_open(allocated_usdc, f"Buy: {opp.get('market_title', '')[:80]}")
+            if err:
+                return {"success": False, "error": err}
+            shares = allocated_usdc / exec_price
+            try:
+                await self._record_position(opp, shares, allocated_usdc, "paper_order_id", fill_price=exec_price, pos_id=pos_id)
+            except Exception as e:
+                self._paper_refund(pos_id, allocated_usdc, "position record failed")
+                return {"success": False, "error": f"Failed to record position (funds refunded): {e}"}
+            await alert.send(f"Paper trade executed: {opp['market_title']} -> {opp['outcome']} for ${allocated_usdc:.2f} USDC at ${exec_price:.4f}", level="success")
+            return {"success": True, "mode": "paper", "position_id": pos_id}
+
+        if not self._clob_client:
+            return {"success": False, "error": "CLOB client not configured for live trading"}
+
+        if is_manual_trade:
+            # Execute manual order directly
+            from py_clob_client.clob_types import OrderArgs
+            price = exec_price
+            shares = round(allocated_usdc / price, 2)
+            try:
+                if not token_id:
+                    return {"success": False, "error": "Manual live trade requires a CLOB token_id"}
+                order = self._clob_client.create_order(OrderArgs(
+                    price=price, size=shares, side="BUY", token_id=token_id
+                ))
+                resp = self._clob_client.post_order(order)
+                order_id = resp.get("orderID")
+                if not order_id:
+                    return {"success": False, "error": f"No orderID returned: {resp}"}
+                fill_res = await self._verify_order_fill(order_id)
+                if not fill_res.get("success"):
+                    return {"success": False, "error": f"Order placed but fill failed: {fill_res.get('error')}"}
+                shares = fill_res["fill_shares"]
+                allocated_usdc = fill_res["fill_cost"]
+                price = fill_res["fill_price"]
+
+                await self._record_position(opp, shares, allocated_usdc, order_id, fill_price=price)
+                await alert.send(f"Manual trade executed: {opp['market_title']} -> {opp['outcome']} for ${allocated_usdc:.2f} USDC", level="success")
+                return {"success": True, "order_id": order_id}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        strat = get_strategy(strat_key)
+        if not strat:
+            return {"success": False, "error": f"Strategy {strat_key} not registered"}
+
+        res = await strat.execute(opp, self._clob_client)
+        if res.get("success"):
+            order_id = res.get("order_id")
+            # Poll for order fill!
+            fill_res = await self._verify_order_fill(order_id)
+            if fill_res.get("success"):
+                shares = fill_res["fill_shares"]
+                cost_usdc = fill_res["fill_cost"]
+                fill_price = fill_res["fill_price"]
+                await self._record_position(opp, shares, cost_usdc, order_id, fill_price=fill_price)
+                await alert.send(f"Live trade executed & filled: {opp['market_title']} -> {opp['outcome']} for ${cost_usdc:.2f} USDC at ${fill_price:.4f}", level="success")
+                return {"success": True, "order_id": order_id}
             else:
-                # Single leg execution
-                if strat_key in ("manual", "manual_trade"):
-                    # Execute manual order directly
-                    from py_clob_client.clob_types import OrderArgs
-                    token_id = opp.get("token_id")
-                    price = float(opp["entry_price"])
-                    shares = round(allocated_usdc / price, 2)
-                    try:
-                        if mode == "live" and self._clob_client and token_id:
-                            order = self._clob_client.create_order(OrderArgs(
-                                price=price, size=shares, side="BUY", token_id=token_id
-                            ))
-                            resp = self._clob_client.post_order(order)
-                            order_id = resp.get("orderID")
-                            if not order_id:
-                                return {"success": False, "error": f"No orderID returned: {resp}"}
-                            fill_res = await self._verify_order_fill(order_id)
-                            if not fill_res.get("success"):
-                                return {"success": False, "error": f"Order placed but fill failed: {fill_res.get('error')}"}
-                            shares = fill_res["fill_shares"]
-                            allocated_usdc = fill_res["fill_cost"]
-                            price = fill_res["fill_price"]
-                        else:
-                            order_id = "paper_manual_order_id"
-                        
-                        await self._record_position(opp, shares, allocated_usdc, order_id, fill_price=price)
-                        await alert.send(f"Manual trade executed: {opp['market_title']} -> {opp['outcome']} for ${allocated_usdc:.2f} USDC", level="success")
-                        return {"success": True, "order_id": order_id}
-                    except Exception as e:
-                        return {"success": False, "error": str(e)}
-
-                strat = get_strategy(strat_key)
-                if not strat:
-                    return {"success": False, "error": f"Strategy {strat_key} not registered"}
-
-                res = await strat.execute(opp, self._clob_client)
-                if res.get("success"):
-                    order_id = res.get("order_id")
-                    # Poll for order fill!
-                    fill_res = await self._verify_order_fill(order_id)
-                    if fill_res.get("success"):
-                        shares = fill_res["fill_shares"]
-                        cost_usdc = fill_res["fill_cost"]
-                        fill_price = fill_res["fill_price"]
-                        await self._record_position(opp, shares, cost_usdc, order_id, fill_price=fill_price)
-                        await alert.send(f"Live trade executed & filled: {opp['market_title']} -> {opp['outcome']} for ${cost_usdc:.2f} USDC at ${fill_price:.4f}", level="success")
-                        return {"success": True, "order_id": order_id}
-                    else:
-                        return {"success": False, "error": f"Order was not filled: {fill_res.get('error')}"}
-                else:
-                    return {"success": False, "error": res.get("error")}
+                return {"success": False, "error": f"Order was not filled: {fill_res.get('error')}"}
+        else:
+            return {"success": False, "error": res.get("error")}
 
     async def _verify_order_fill(self, order_id: str, timeout_s: float = 10.0) -> dict:
         """Poll order status until FILLED, CANCELED, or timeout."""
@@ -469,14 +646,16 @@ class PolyYieldEngine:
             order_id = resp.get("orderID")
             if not order_id:
                 return {"success": False, "error": f"No orderID returned: {resp}"}
-            # Verify fill status
-            return await self._verify_order_fill(order_id)
+            # Verify fill status; always carry the order_id so rollback/recording can reference it
+            fill_res = await self._verify_order_fill(order_id)
+            fill_res["order_id"] = order_id
+            return fill_res
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def _record_position(self, opp: dict, shares: float, cost_usdc: float, order_id: str, fill_price: float = None):
+    async def _record_position(self, opp: dict, shares: float, cost_usdc: float, order_id: str, fill_price: float = None, pos_id: str = None):
         from strategies.base import days_to_expiry
-        pos_id = f"pos_{uuid.uuid4().hex[:8]}"
+        pos_id = pos_id or f"pos_{uuid.uuid4().hex[:8]}"
         mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
         
         # Retrieve default stop-loss / take-profit percentages from config
@@ -510,16 +689,16 @@ class PolyYieldEngine:
             with _sqlite_lock:
                 conn.execute("""
                     INSERT INTO poly_yield_positions
-                    (id, opportunity_id, strategy, market_id, market_title, outcome,
+                    (id, opportunity_id, strategy, market_id, market_title, token_id, outcome,
                      shares, entry_price, cost_usdc, order_id, status, entry_at,
                      predicted_apy, predicted_profit_pct, predicted_days_to_expiry,
                      actual_fill_price, actual_gas_usdc, risk_level, fill_slippage_bps,
                      quality_at_entry, predicted_pnl_usdc, mode,
                      stop_loss_price, take_profit_price, trailing_stop_pct, highest_price)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, [
                     pos_id, opp.get("id"), opp.get("strategy"), opp.get("market_id"),
-                    opp.get("market_title"), opp.get("outcome"),
+                    opp.get("market_title"), opp.get("token_id"), opp.get("outcome"),
                     shares, opp.get("entry_price"), cost_usdc, str(order_id), "open",
                     opp.get("annualized_apy"), opp.get("profit_pct"), opp.get("days_to_expiry"),
                     entry_price, 0.005, opp.get("risk_level"), opp.get("slippage_bps"),
@@ -558,11 +737,14 @@ class PolyYieldEngine:
             return {"success": False, "error": "Open position not found"}
         
         pos = dict(row)
-        token_id = None
+        if not (0 < current_price <= 1.0):
+            return {"success": False, "error": f"Invalid exit price {current_price} (must be between 0 and 1)"}
+
+        token_id = pos.get("token_id")  # persisted at entry time
         mode = pos["mode"]
 
-        # Sourcing CLOB token ID from Gamma API if we are in live mode
-        if mode == "live":
+        # Fallback: source CLOB token ID from Gamma API if we are in live mode without a stored one
+        if mode == "live" and not token_id:
             try:
                 r = await self._http.get(f"{GAMMA_URL}/markets/{pos['market_id']}")
                 if r.status_code == 200:
@@ -577,8 +759,8 @@ class PolyYieldEngine:
             except Exception as e:
                 _log.error("Failed to fetch token ID for exit: %s", e)
 
-            if not token_id:
-                return {"success": False, "error": "Could not resolve CLOB token ID for live exit"}
+        if mode == "live" and not token_id:
+            return {"success": False, "error": "Could not resolve CLOB token ID for live exit"}
 
         shares = float(pos["shares"])
         cost = float(pos["cost_usdc"])
