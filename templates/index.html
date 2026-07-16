@@ -765,12 +765,13 @@
                                         <span id="sort_size" style="font-size:10px; opacity:0.5;">↕</span>
                                     </div>
                                 </th>
+                                <th>Max Profit / Max Loss</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody id="opportunitiesBody">
                             <tr>
-                                <td colspan="7" style="text-align: center; color: var(--text-secondary);">No opportunities found yet. Scanning...</td>
+                                <td colspan="8" style="text-align: center; color: var(--text-secondary);">No opportunities found yet. Scanning...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -837,6 +838,9 @@
                                 <th>Outcome</th>
                                 <th>Cost (USDC)</th>
                                 <th>Entry Price</th>
+                                <th>Max Profit / Max Loss</th>
+                                <th>Opened At</th>
+                                <th>Executed By</th>
                                 <th>Mode</th>
                                 <th>Status</th>
                                 <th>Action</th>
@@ -844,10 +848,135 @@
                         </thead>
                         <tbody id="positionsBody">
                             <tr>
-                                <td colspan="8" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td>
+                                <td colspan="11" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td>
                             </tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- Trade History & Audit -->
+            <div class="glass-panel">
+                <div class="panel-title" onclick="toggleTradeHistory()" style="cursor: pointer; user-select: none; display: flex; justify-content: space-between; align-items: center;">
+                    <span>TRADE HISTORY &amp; AUDIT</span>
+                    <span id="tradeHistoryArrow" style="transition: transform 0.3s; font-size: 14px;">▼</span>
+                </div>
+                <div id="tradeHistoryContent" style="display: none; margin-top: 20px;">
+
+                    <div class="stats-grid" id="acctStatsGrid" style="grid-template-columns: repeat(6, 1fr); margin-bottom: 24px;">
+                        <div class="glass-panel" style="padding:16px;">
+                            <div style="font-size: 11px; color: var(--text-secondary);">Total Trades</div>
+                            <div class="metric-value" style="font-size:22px;" id="acctTradeCount">0</div>
+                            <div class="metric-sub" id="acctOpenClosedSub"></div>
+                        </div>
+                        <div class="glass-panel" style="padding:16px;">
+                            <div style="font-size: 11px; color: var(--text-secondary);">Win Rate</div>
+                            <div class="metric-value" style="font-size:22px;" id="acctWinRate">—</div>
+                        </div>
+                        <div class="glass-panel" style="padding:16px;">
+                            <div style="font-size: 11px; color: var(--text-secondary);">Total Volume Traded</div>
+                            <div class="metric-value" style="font-size:22px;" id="acctVolume">$0.00</div>
+                        </div>
+                        <div class="glass-panel" style="padding:16px;">
+                            <div style="font-size: 11px; color: var(--text-secondary);">Realized PnL</div>
+                            <div class="metric-value" style="font-size:22px;" id="acctRealizedPnl">$0.00</div>
+                        </div>
+                        <div class="glass-panel" style="padding:16px;">
+                            <div style="font-size: 11px; color: var(--text-secondary);">Gas Paid</div>
+                            <div class="metric-value" style="font-size:22px;" id="acctGasPaid">$0.00</div>
+                        </div>
+                        <div class="glass-panel" style="padding:16px;">
+                            <div style="font-size: 11px; color: var(--text-secondary);">Avg Hold Time</div>
+                            <div class="metric-value" style="font-size:22px;" id="acctAvgHold">—</div>
+                        </div>
+                    </div>
+
+                    <div id="acctLedgerHealthBanner" style="display:none; margin-bottom:20px; padding:10px 16px; border-radius:10px; font-size:12px; font-weight:600;"></div>
+
+                    <div style="margin-bottom: 24px;">
+                        <div style="font-family:'Space Grotesk', sans-serif; font-size:14px; font-weight:600; margin-bottom:10px; color:var(--text-secondary);">Per-Strategy Breakdown</div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Strategy</th><th>Trades</th><th>Open</th><th>Won</th><th>Lost</th>
+                                        <th>Win Rate</th><th>Volume</th><th>Realized PnL</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="acctStrategyBody">
+                                    <tr><td colspan="8" style="text-align:center; color:var(--text-secondary);">No data yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap; align-items:flex-end;">
+                        <div class="control-group" style="margin-bottom:0;">
+                            <label class="control-label">Mode</label>
+                            <select id="historyModeFilter" class="control-input" style="background:#1b203c;" onchange="fetchAccountingSummary(); fetchTradeHistory();">
+                                <option value="paper">Paper</option>
+                                <option value="live">Live</option>
+                                <option value="">All</option>
+                            </select>
+                        </div>
+                        <div class="control-group" style="margin-bottom:0;">
+                            <label class="control-label">Status</label>
+                            <select id="historyStatusFilter" class="control-input" style="background:#1b203c;" onchange="fetchTradeHistory()">
+                                <option value="">All</option>
+                                <option value="open">Open</option>
+                                <option value="won">Won</option>
+                                <option value="lost">Lost</option>
+                            </select>
+                        </div>
+                        <div class="control-group" style="margin-bottom:0;">
+                            <label class="control-label">Executed By</label>
+                            <select id="historyExecFilter" class="control-input" style="background:#1b203c;" onchange="fetchTradeHistory()">
+                                <option value="">All</option>
+                                <option value="bot">🤖 Bot</option>
+                                <option value="manual">🖐 Manual</option>
+                            </select>
+                        </div>
+                        <div class="control-group" style="margin-bottom:0; flex:1; min-width:200px;">
+                            <label class="control-label">Search Market</label>
+                            <input type="text" id="historySearchFilter" class="control-input" placeholder="Filter by market title..." oninput="renderTradeHistoryTable()">
+                        </div>
+                        <button class="btn" onclick="fetchAccountingSummary(); fetchTradeHistory();" style="padding:10px 16px; font-size:12px;">Refresh</button>
+                    </div>
+
+                    <div class="table-container" style="max-height: 480px; overflow-y: auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Strategy</th><th>Market</th><th>Outcome</th><th>Mode</th><th>By</th>
+                                    <th>Cost</th><th>Entry</th><th>Exit</th><th>Opened At</th><th>Closed At</th>
+                                    <th>Realized PnL</th><th>APY Δ</th><th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tradeHistoryBody">
+                                <tr><td colspan="13" style="text-align:center; color:var(--text-secondary);">Loading history...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style="margin-top:24px;">
+                        <div onclick="toggleWalletLedger()" style="cursor:pointer; user-select:none; display:flex; justify-content:space-between; align-items:center; font-family:'Space Grotesk', sans-serif; font-size:14px; font-weight:600; color:var(--text-secondary); border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom:8px;">
+                            <span>Raw Wallet Ledger (Paper) — Full Audit Log</span>
+                            <span id="walletLedgerArrow" style="transition: transform 0.3s; font-size:12px;">▼</span>
+                        </div>
+                        <div id="walletLedgerContent" style="display:none; margin-top:12px;">
+                            <div class="table-container" style="max-height: 320px; overflow-y: auto;">
+                                <table>
+                                    <thead>
+                                        <tr><th>Time</th><th>Type</th><th>Amount</th><th>Balance Before</th><th>Balance After</th><th>Description</th></tr>
+                                    </thead>
+                                    <tbody id="walletLedgerBody">
+                                        <tr><td colspan="6" style="text-align:center; color:var(--text-secondary);">Not loaded yet.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
 
@@ -1209,7 +1338,7 @@
             const tbody = document.getElementById("opportunitiesBody");
             
             if (processedOppCache.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No opportunities found yet. Scanning...</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">No opportunities found yet. Scanning...</td></tr>`;
                 return;
             }
 
@@ -1244,7 +1373,7 @@
             }
 
             if (filtered.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No matching opportunities.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">No matching opportunities.</td></tr>`;
                 return;
             }
 
@@ -1271,10 +1400,11 @@
                         <td>${opp.implied_prob != null ? opp.implied_prob + '%' : 'N/A'}</td>
                         <td><span style="color:var(--cyber-emerald); font-weight:600;">${opp.annualized_apy != null ? opp.annualized_apy + '%' : 'N/A'}</span>${opp.days_to_expiry != null && opp.days_to_expiry < 7 ? '<br><span style="font-size:10px;color:var(--alert-orange)">short-term</span>' : ''}</td>
                         <td>${sizeText}</td>
+                        <td>${formatPayoff(opp.max_profit_usdc, opp.max_loss_usdc)}</td>
                         <td>${execBtn}</td>
                     </tr>
                     <tr id="details_${idx}" data-opp-id="${escapeHtml(opp.id || '')}" style="display:none; background: rgba(255,255,255,0.015);">
-                        <td colspan="7" style="padding: 16px 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                        <td colspan="8" style="padding: 16px 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
                             <div style="display:flex; justify-content:space-between; gap:40px; align-items:center;">
                                 <div style="display:flex; flex-direction:column; gap:8px; font-size:12px; flex:1;">
                                     <div style="display:flex; align-items:center; gap:8px;">
@@ -1401,7 +1531,7 @@
                 const tbody = document.getElementById("positionsBody");
 
                 if (data.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td></tr>`;
                     return;
                 }
 
@@ -1412,6 +1542,9 @@
                         <td><span style="color:var(--cyber-emerald);">${escapeHtml(pos.outcome || '')}</span></td>
                         <td>$${(pos.cost_usdc || 0).toFixed(2)}</td>
                         <td>$${(pos.entry_price || 0).toFixed(4)}</td>
+                        <td>${formatPayoff(pos.max_profit_usdc, pos.max_loss_usdc)}</td>
+                        <td style="font-size:11px; white-space:nowrap;">${formatDateTime(pos.entry_at)}</td>
+                        <td>${formatExecutedByBadge(pos.executed_by)}</td>
                         <td><span style="text-transform:uppercase; font-size:11px; font-weight:600; color: ${pos.mode==='live' ? 'var(--hot-pink)' : 'var(--text-secondary)'}">${pos.mode || 'paper'}</span></td>
                         <td><span style="color: ${pos.status === 'open' ? 'var(--alert-orange)' : pos.status === 'won' ? 'var(--cyber-emerald)' : 'var(--hot-pink)'}; font-weight:600; text-transform:capitalize;">${pos.status}${pos.realized_pnl != null && pos.status !== 'open' ? ' (' + (pos.realized_pnl >= 0 ? '+' : '') + '$' + pos.realized_pnl.toFixed(2) + ')' : ''}</span></td>
                         <td>
@@ -1749,6 +1882,37 @@
             if (level === "Low") return "badge-low";
             if (level === "Medium") return "badge-med";
             return "badge-high";
+        }
+
+        // Renders a best-case/worst-case USDC payoff. When both numbers are equal
+        // (arbitrage baskets: the payout is guaranteed regardless of outcome) shows a
+        // single "Guaranteed" figure instead of a misleading range.
+        function formatPayoff(maxProfit, maxLoss) {
+            if (maxProfit == null || maxLoss == null) {
+                return `<span style="color:var(--text-secondary); font-size:11px;">N/A</span>`;
+            }
+            const fmt = (v) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
+            if (Math.abs(maxProfit - maxLoss) < 0.005) {
+                return `<span style="color:var(--cyber-emerald); font-weight:600; font-size:12px;" title="Arbitrage: guaranteed payout regardless of outcome">🔒 ${fmt(maxProfit)}</span>`;
+            }
+            return `<span style="color:var(--cyber-emerald); font-size:12px;">▲ ${fmt(maxProfit)}</span><br><span style="color:var(--hot-pink); font-size:12px;">▼ ${fmt(maxLoss)}</span>`;
+        }
+
+        function formatExecutedByBadge(executedBy) {
+            const isManual = executedBy === 'manual';
+            const icon = isManual ? '🖐' : '🤖';
+            const label = isManual ? 'Manual' : 'Bot';
+            const color = isManual ? 'var(--alert-orange)' : 'var(--cyber-emerald)';
+            return `<span style="font-size:11px; font-weight:600; color:${color};">${icon} ${label}</span>`;
+        }
+
+        function formatDateTime(ts) {
+            if (!ts) return '—';
+            // SQLite stores 'YYYY-MM-DD HH:MM:SS' in UTC; normalize so Date parses it as UTC
+            const iso = ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return escapeHtml(ts);
+            return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
         }
 
         function escapeHtml(text) {
@@ -2235,6 +2399,202 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key: fullKey, value: dbVal.toString() })
             });
+        }
+
+        // ---------------------------------------------------------------------
+        // Trade History & Audit
+        // ---------------------------------------------------------------------
+        let isTradeHistoryLoaded = false;
+        let rawTradeHistory = [];
+
+        function toggleTradeHistory() {
+            const content = document.getElementById("tradeHistoryContent");
+            const arrow = document.getElementById("tradeHistoryArrow");
+            if (content.style.display === "none") {
+                content.style.display = "block";
+                arrow.style.transform = "rotate(180deg)";
+                if (!isTradeHistoryLoaded) {
+                    isTradeHistoryLoaded = true;
+                    fetchAccountingSummary();
+                    fetchTradeHistory();
+                }
+            } else {
+                content.style.display = "none";
+                arrow.style.transform = "rotate(0deg)";
+            }
+        }
+
+        function toggleWalletLedger() {
+            const content = document.getElementById("walletLedgerContent");
+            const arrow = document.getElementById("walletLedgerArrow");
+            if (content.style.display === "none") {
+                content.style.display = "block";
+                arrow.style.transform = "rotate(180deg)";
+                fetchWalletLedger();
+            } else {
+                content.style.display = "none";
+                arrow.style.transform = "rotate(0deg)";
+            }
+        }
+
+        function formatHours(hours) {
+            if (hours == null || isNaN(hours)) return '—';
+            if (hours < 1) return `${Math.round(hours * 60)}m`;
+            if (hours < 48) return `${hours.toFixed(1)}h`;
+            return `${(hours / 24).toFixed(1)}d`;
+        }
+
+        async function fetchAccountingSummary() {
+            const mode = document.getElementById("historyModeFilter")?.value || "paper";
+            try {
+                const r = await fetch(`/api/poly-yield/accounting?mode=${encodeURIComponent(mode)}`);
+                const data = await r.json();
+                const t = data.totals || {};
+
+                document.getElementById("acctTradeCount").innerText = t.trade_count || 0;
+                document.getElementById("acctOpenClosedSub").innerText =
+                    `${t.open_count || 0} open / ${t.won_count || 0} won / ${t.lost_count || 0} lost`;
+                document.getElementById("acctWinRate").innerText = t.win_rate_pct != null ? `${t.win_rate_pct}%` : "—";
+                document.getElementById("acctVolume").innerText = `$${(t.total_volume_usdc || 0).toFixed(2)}`;
+
+                const pnlEl = document.getElementById("acctRealizedPnl");
+                const pnl = t.total_realized_pnl || 0;
+                pnlEl.innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+                pnlEl.style.color = pnl >= 0 ? "var(--cyber-emerald)" : "var(--hot-pink)";
+
+                document.getElementById("acctGasPaid").innerText = `$${(t.total_gas_usdc || 0).toFixed(3)}`;
+                document.getElementById("acctAvgHold").innerText = formatHours(t.avg_hold_hours);
+
+                // Per-strategy breakdown
+                const strategyBody = document.getElementById("acctStrategyBody");
+                const rows = data.by_strategy || [];
+                if (rows.length === 0) {
+                    strategyBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-secondary);">No trades yet for ${escapeHtml(mode || 'this mode')}.</td></tr>`;
+                } else {
+                    strategyBody.innerHTML = rows.map(s => {
+                        const sPnl = s.realized_pnl || 0;
+                        return `
+                        <tr>
+                            <td><span style="font-weight:600;">${formatStrategyName(s.strategy)}</span></td>
+                            <td>${s.trade_count || 0}</td>
+                            <td>${s.open_count || 0}</td>
+                            <td style="color:var(--cyber-emerald);">${s.won_count || 0}</td>
+                            <td style="color:var(--hot-pink);">${s.lost_count || 0}</td>
+                            <td>${s.win_rate_pct != null ? s.win_rate_pct + '%' : '—'}</td>
+                            <td>$${(s.volume_usdc || 0).toFixed(2)}</td>
+                            <td style="color:${sPnl >= 0 ? 'var(--cyber-emerald)' : 'var(--hot-pink)'}; font-weight:600;">${sPnl >= 0 ? '+' : ''}$${sPnl.toFixed(2)}</td>
+                        </tr>`;
+                    }).join("");
+                }
+
+                // Ledger conservation banner (paper mode only)
+                const banner = document.getElementById("acctLedgerHealthBanner");
+                if (data.ledger_health) {
+                    const h = data.ledger_health;
+                    banner.style.display = "block";
+                    if (h.valid) {
+                        banner.style.background = "rgba(5, 255, 201, 0.08)";
+                        banner.style.border = "1px solid rgba(5, 255, 201, 0.25)";
+                        banner.style.color = "var(--cyber-emerald)";
+                        banner.innerText = `✅ Wallet ledger audit: ${h.status.toUpperCase()} — actual $${h.actual_balance.toFixed(2)} matches expected $${h.expected_balance.toFixed(2)} across ${h.ledger_entries} entries.`;
+                    } else {
+                        banner.style.background = "rgba(255, 0, 127, 0.1)";
+                        banner.style.border = "1px solid rgba(255, 0, 127, 0.3)";
+                        banner.style.color = "var(--hot-pink)";
+                        banner.innerText = `🚨 Wallet ledger DRIFT DETECTED: actual $${h.actual_balance.toFixed(2)} vs expected $${h.expected_balance.toFixed(2)} (drift $${h.drift.toFixed(2)}). Check /api/poly-yield/wallet-health.`;
+                    }
+                } else {
+                    banner.style.display = "none";
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function fetchTradeHistory() {
+            const mode = document.getElementById("historyModeFilter")?.value || "";
+            const status = document.getElementById("historyStatusFilter")?.value || "";
+            const executedBy = document.getElementById("historyExecFilter")?.value || "";
+            const params = new URLSearchParams({ limit: "500" });
+            if (mode) params.set("mode", mode);
+            if (status) params.set("status", status);
+            if (executedBy) params.set("executed_by", executedBy);
+
+            try {
+                const r = await fetch(`/api/poly-yield/history?${params.toString()}`);
+                rawTradeHistory = await r.json();
+                renderTradeHistoryTable();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function renderTradeHistoryTable() {
+            const tbody = document.getElementById("tradeHistoryBody");
+            const search = (document.getElementById("historySearchFilter")?.value || "").toLowerCase();
+
+            const rows = search
+                ? rawTradeHistory.filter(p => (p.market_title || "").toLowerCase().includes(search))
+                : rawTradeHistory;
+
+            if (rows.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:var(--text-secondary);">No trades match these filters.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = rows.map(p => {
+                const pnl = p.realized_pnl;
+                const pnlHtml = pnl != null
+                    ? `<span style="color:${pnl >= 0 ? 'var(--cyber-emerald)' : 'var(--hot-pink)'}; font-weight:600;">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span>`
+                    : `<span style="color:var(--text-secondary);">—</span>`;
+                const apyDeltaHtml = p.apy_delta != null
+                    ? `<span style="color:${p.apy_delta >= 0 ? 'var(--cyber-emerald)' : 'var(--hot-pink)'};">${p.apy_delta >= 0 ? '+' : ''}${p.apy_delta.toFixed(1)}%</span>`
+                    : `<span style="color:var(--text-secondary);">—</span>`;
+                const exitPriceText = p.exit_price != null ? `$${p.exit_price.toFixed(4)}` : '—';
+                return `
+                    <tr>
+                        <td><span class="badge ${getRiskBadge(p.risk_level)}">${formatStrategyName(p.strategy)}</span></td>
+                        <td style="max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(p.market_title || '')}">${escapeHtml(p.market_title || '')}</td>
+                        <td>${escapeHtml(p.outcome || '')}</td>
+                        <td><span style="text-transform:uppercase; font-size:11px; font-weight:600; color:${p.mode === 'live' ? 'var(--hot-pink)' : 'var(--text-secondary)'};">${p.mode || 'paper'}</span></td>
+                        <td>${formatExecutedByBadge(p.executed_by)}</td>
+                        <td>$${(p.cost_usdc || 0).toFixed(2)}</td>
+                        <td>$${(p.entry_price || 0).toFixed(4)}</td>
+                        <td>${exitPriceText}</td>
+                        <td style="font-size:11px; white-space:nowrap;">${formatDateTime(p.entry_at)}</td>
+                        <td style="font-size:11px; white-space:nowrap;">${formatDateTime(p.settled_at)}</td>
+                        <td>${pnlHtml}</td>
+                        <td>${apyDeltaHtml}</td>
+                        <td><span style="color: ${p.status === 'open' ? 'var(--alert-orange)' : p.status === 'won' ? 'var(--cyber-emerald)' : 'var(--hot-pink)'}; font-weight:600; text-transform:capitalize;">${p.status}</span></td>
+                    </tr>
+                `;
+            }).join("");
+        }
+
+        async function fetchWalletLedger() {
+            const tbody = document.getElementById("walletLedgerBody");
+            try {
+                const r = await fetch("/api/poly-yield/ledger?mode=paper&limit=200");
+                const rows = await r.json();
+                if (rows.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-secondary);">No ledger entries yet.</td></tr>`;
+                    return;
+                }
+                tbody.innerHTML = rows.map(e => {
+                    const amt = e.amount || 0;
+                    return `
+                    <tr>
+                        <td style="font-size:11px; white-space:nowrap;">${formatDateTime(e.created_at)}</td>
+                        <td style="font-size:11px;">${escapeHtml(e.tx_type || '')}</td>
+                        <td style="color:${amt >= 0 ? 'var(--cyber-emerald)' : 'var(--hot-pink)'}; font-weight:600;">${amt >= 0 ? '+' : ''}$${amt.toFixed(2)}</td>
+                        <td>$${(e.balance_before || 0).toFixed(2)}</td>
+                        <td>$${(e.balance_after || 0).toFixed(2)}</td>
+                        <td style="font-size:11px; max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(e.description || '')}">${escapeHtml(e.description || '')}</td>
+                    </tr>`;
+                }).join("");
+            } catch (e) {
+                console.error(e);
+            }
         }
 
         // Init
