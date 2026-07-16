@@ -218,9 +218,10 @@ class PolyYieldSettlement:
                 conn.execute("""
                     UPDATE poly_yield_positions
                     SET status = ?, settled_at = datetime('now'), realized_pnl = ?,
-                        settlement_outcome = ?, apy_delta = ?
+                        settlement_outcome = ?, apy_delta = ?, exit_price = ?
                     WHERE id = ?
-                """, [status, realized_pnl, settlement_outcome, apy_delta, pos["id"]])
+                """, [status, realized_pnl, settlement_outcome, apy_delta,
+                      1.0 if status == "won" else 0.0, pos["id"]])
 
                 # Update cumulative statistics
                 self._update_stats(conn, pos.get("strategy"), realized_pnl, status, pos.get("mode", "paper"), float(pos.get("cost_usdc") or 0))

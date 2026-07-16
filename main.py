@@ -120,7 +120,17 @@ async def get_opportunities():
         # Display sizing: clip the strategy's suggested size to remaining drawdown room.
         # (The authoritative sizing check re-runs at execution time.)
         suggested = float(d.get("suggested_usdc") or 0.0)
-        d["suggested_usdc"] = round(min(suggested, remaining_room), 2)
+        clipped = round(min(suggested, remaining_room), 2)
+        d["suggested_usdc"] = clipped
+        # Max profit/loss scale linearly with capital deployed — rescale so displayed
+        # payoff always matches the displayed (possibly clipped) size, never the
+        # pre-clip scan-time size.
+        if suggested > 0 and clipped != suggested:
+            ratio = clipped / suggested
+            if d.get("max_profit_usdc") is not None:
+                d["max_profit_usdc"] = round(d["max_profit_usdc"] * ratio, 4)
+            if d.get("max_loss_usdc") is not None:
+                d["max_loss_usdc"] = round(d["max_loss_usdc"] * ratio, 4)
         opportunities.append(d)
 
     return opportunities
@@ -163,14 +173,107 @@ async def reset_stats(_=Depends(verify_token)):
     return {"status": "success"}
 
 @app.get("/api/poly-yield/history")
-async def get_history():
-    """Retrieve all historical positions across all modes."""
+async def get_history(mode: str = None, strategy: str = None, status: str = None,
+                       executed_by: str = None, limit: int = 500):
+    """Retrieve historical positions (open + settled), optionally filtered, for the
+    Trade History & Audit view. Defaults to all modes/strategies/statuses, newest first."""
+    limit = max(1, min(limit, 5000))
+    clauses = []
+    params = []
+    if mode:
+        clauses.append("mode = ?")
+        params.append(mode)
+    if strategy:
+        clauses.append("strategy = ?")
+        params.append(strategy)
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if executed_by:
+        clauses.append("COALESCE(executed_by, 'bot') = ?")
+        params.append(executed_by)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
     conn = get_sqlite()
     with _sqlite_lock:
         rows = conn.execute(
-            "SELECT * FROM poly_yield_positions ORDER BY entry_at DESC"
+            f"SELECT * FROM poly_yield_positions {where} ORDER BY entry_at DESC LIMIT ?",
+            [*params, limit]
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+@app.get("/api/poly-yield/accounting")
+async def get_accounting(mode: str = "paper"):
+    """
+    Full accounting & audit summary for the Trade History tab: totals, per-strategy
+    breakdown, manual-vs-bot breakdown, and (for paper) the wallet ledger conservation
+    check — every number here is recomputed directly from poly_yield_positions rather
+    than the incrementally-maintained poly_yield_stats table, so it can't drift.
+    """
+    conn = get_sqlite()
+    with _sqlite_lock:
+        totals_row = conn.execute("""
+            SELECT
+                COUNT(*) as trade_count,
+                SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
+                SUM(CASE WHEN status = 'won' THEN 1 ELSE 0 END) as won_count,
+                SUM(CASE WHEN status = 'lost' THEN 1 ELSE 0 END) as lost_count,
+                SUM(COALESCE(cost_usdc, 0)) as total_volume_usdc,
+                SUM(CASE WHEN status IN ('won','lost') THEN COALESCE(realized_pnl, 0) ELSE 0 END) as total_realized_pnl,
+                SUM(COALESCE(actual_gas_usdc, 0)) as total_gas_usdc,
+                SUM(CASE WHEN status IN ('won','lost') THEN MAX(0, COALESCE(cost_usdc,0) + COALESCE(realized_pnl,0)) ELSE 0 END) as total_returned,
+                AVG(CASE WHEN status IN ('won','lost') AND settled_at IS NOT NULL
+                         THEN (julianday(settled_at) - julianday(entry_at)) * 24.0 ELSE NULL END) as avg_hold_hours,
+                AVG(CASE WHEN status IN ('won','lost') THEN apy_delta ELSE NULL END) as avg_apy_delta
+            FROM poly_yield_positions WHERE mode = ?
+        """, [mode]).fetchone()
+
+        by_strategy_rows = conn.execute("""
+            SELECT strategy,
+                COUNT(*) as trade_count,
+                SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
+                SUM(CASE WHEN status = 'won' THEN 1 ELSE 0 END) as won_count,
+                SUM(CASE WHEN status = 'lost' THEN 1 ELSE 0 END) as lost_count,
+                SUM(COALESCE(cost_usdc, 0)) as volume_usdc,
+                SUM(CASE WHEN status IN ('won','lost') THEN COALESCE(realized_pnl, 0) ELSE 0 END) as realized_pnl
+            FROM poly_yield_positions WHERE mode = ?
+            GROUP BY strategy ORDER BY volume_usdc DESC
+        """, [mode]).fetchall()
+
+        by_source_rows = conn.execute("""
+            SELECT COALESCE(executed_by, 'bot') as executed_by,
+                COUNT(*) as trade_count,
+                SUM(COALESCE(cost_usdc, 0)) as volume_usdc,
+                SUM(CASE WHEN status IN ('won','lost') THEN COALESCE(realized_pnl, 0) ELSE 0 END) as realized_pnl
+            FROM poly_yield_positions WHERE mode = ?
+            GROUP BY COALESCE(executed_by, 'bot')
+        """, [mode]).fetchall()
+
+    totals = dict(totals_row) if totals_row else {}
+    won = totals.get("won_count") or 0
+    lost = totals.get("lost_count") or 0
+    totals["win_rate_pct"] = round((won / (won + lost)) * 100.0, 2) if (won + lost) > 0 else None
+
+    by_strategy = []
+    for r in by_strategy_rows:
+        d = dict(r)
+        w, l = d.get("won_count") or 0, d.get("lost_count") or 0
+        d["win_rate_pct"] = round((w / (w + l)) * 100.0, 2) if (w + l) > 0 else None
+        by_strategy.append(d)
+
+    ledger_health = None
+    if mode == "paper":
+        from services.wallet import wallet_service
+        ledger_health = wallet_service.verify_conservation("paper")
+
+    return {
+        "mode": mode,
+        "totals": totals,
+        "by_strategy": by_strategy,
+        "by_executed_by": [dict(r) for r in by_source_rows],
+        "ledger_health": ledger_health,
+    }
 
 @app.get("/api/poly-yield/config")
 async def get_config():
@@ -239,7 +342,7 @@ async def trigger_execution(opp_id: str, _=Depends(verify_token)):
     if opp.get("instructions"):
         opp["instructions"] = json.loads(opp["instructions"])
 
-    result = await poly_yield_engine.execute_opportunity(opp)
+    result = await poly_yield_engine.execute_opportunity(opp, triggered_by="manual")
     if result.get("success"):
         return result
     else:
@@ -320,7 +423,7 @@ async def place_manual_trade(trade: ManualTradeArgs, _=Depends(verify_token)):
     # Save opportunity record so foreign keys validate
     await poly_yield_engine._upsert_opportunity(opp)
     
-    res = await poly_yield_engine.execute_opportunity(opp)
+    res = await poly_yield_engine.execute_opportunity(opp, triggered_by="manual")
     if res.get("success"):
         return res
     else:
