@@ -1,0 +1,2146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PolyYield // Quantum Prediction Market Engine</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-obsidian: #0b0d19;
+            --panel-glass: rgba(18, 22, 43, 0.65);
+            --border-glow: rgba(123, 44, 191, 0.35);
+            --cyber-emerald: #05ffc9;
+            --vibrant-violet: #7b2cbf;
+            --alert-orange: #ff9f1c;
+            --hot-pink: #ff007f;
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --transition-smooth: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-obsidian);
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(123, 44, 191, 0.15) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(5, 255, 201, 0.08) 0%, transparent 45%);
+            background-attachment: fixed;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 24px 40px;
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-symbol {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--cyber-emerald), var(--vibrant-violet));
+            border-radius: 50% 0 50% 50%;
+            transform: rotate(-45deg);
+            animation: pulse-glow 3s infinite alternate;
+        }
+
+        .logo-text {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            background: linear-gradient(to right, #fff, var(--cyber-emerald));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .network-banner {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 30px;
+            padding: 6px 16px;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+        }
+
+        .network-banner:hover {
+            border-color: var(--cyber-emerald);
+            box-shadow: 0 0 10px rgba(5, 255, 201, 0.2);
+        }
+
+        .network-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--cyber-emerald);
+            box-shadow: 0 0 8px var(--cyber-emerald);
+        }
+
+        .network-status-dot.amoy {
+            background-color: var(--alert-orange);
+            box-shadow: 0 0 8px var(--alert-orange);
+        }
+
+        .main-container {
+            max-width: 1600px;
+            margin: 40px auto;
+            padding: 0 40px;
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 32px;
+        }
+
+        /* Sidebar & Control Center */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+        }
+
+        .glass-panel {
+            background: var(--panel-glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+            transition: var(--transition-smooth);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.25);
+        }
+
+        .glass-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, transparent, rgba(255, 255, 255, 0.02));
+            pointer-events: none;
+        }
+
+        .glass-panel:hover {
+            border-color: var(--border-glow);
+            box-shadow: 0 12px 40px 0 rgba(123, 44, 191, 0.15);
+        }
+
+        .panel-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            letter-spacing: 0.5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 10px;
+        }
+
+        .metric-value {
+            font-size: 32px;
+            font-weight: 800;
+            background: linear-gradient(to right, #fff, #b3c5ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-top: 8px;
+        }
+
+        .metric-sub {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* Form Inputs */
+        .control-group {
+            margin-bottom: 16px;
+        }
+
+        .control-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .control-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 10px 14px;
+            color: #fff;
+            font-family: inherit;
+            outline: none;
+            transition: var(--transition-smooth);
+        }
+
+        .control-input:focus {
+            border-color: var(--vibrant-violet);
+            box-shadow: 0 0 8px rgba(123, 44, 191, 0.2);
+        }
+
+        /* Toggle Switches */
+        .switch-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .switch-label {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--cyber-emerald);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Main Workspace Panels */
+        .workspace {
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+
+        /* Premium Custom Tables */
+        .table-container {
+            overflow-x: auto;
+            margin-top: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            padding: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        td {
+            padding: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            font-size: 14px;
+            vertical-align: middle;
+        }
+
+        tr {
+            transition: var(--transition-smooth);
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        /* Custom Badges */
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-low { background: rgba(5, 255, 201, 0.1); color: var(--cyber-emerald); border: 1px solid rgba(5, 255, 201, 0.2); }
+        .badge-med { background: rgba(255, 159, 28, 0.1); color: var(--alert-orange); border: 1px solid rgba(255, 159, 28, 0.2); }
+        .badge-high { background: rgba(255, 0, 127, 0.1); color: var(--hot-pink); border: 1px solid rgba(255, 0, 127, 0.2); }
+
+        .btn {
+            background: linear-gradient(135deg, var(--vibrant-violet), #5b1a99);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(123, 44, 191, 0.4);
+        }
+
+        .btn-emerald {
+            background: linear-gradient(135deg, var(--cyber-emerald), #00b894);
+            color: #0b0d19;
+        }
+
+        .btn-emerald:hover {
+            box-shadow: 0 4px 12px rgba(5, 255, 201, 0.4);
+        }
+
+        /* Order Book Display */
+        .orderbook-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 16px;
+        }
+
+        .ob-side {
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .ob-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 13px;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .ob-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            padding: 4px 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .ob-bar {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            background: rgba(5, 255, 201, 0.05);
+            z-index: 1;
+            transition: width 0.3s ease;
+        }
+
+        .ob-bar.bid {
+            left: 0;
+            background: rgba(123, 44, 191, 0.05);
+        }
+
+        .ob-val {
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Notifications & logs */
+        .logs-panel {
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            color: #b3c5ff;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding-right: 10px;
+        }
+
+        .logs-panel::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .logs-panel::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+        }
+
+        /* Key modal */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(11, 13, 25, 0.85);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: var(--transition-smooth);
+        }
+
+        .modal.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            width: 450px;
+            background: #12162b;
+            border: 1px solid var(--border-glow);
+            border-radius: 20px;
+            padding: 32px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        @keyframes pulse-glow {
+            from { box-shadow: 0 0 12px var(--vibrant-violet); }
+            to { box-shadow: 0 0 24px var(--cyber-emerald); }
+        }
+
+        /* Bot Strategy Manager Grid & Cards */
+        .strategy-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 20px;
+        }
+        .strategy-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            transition: var(--transition-smooth);
+        }
+        .strategy-card:hover {
+            border-color: var(--border-glow);
+            background: rgba(255, 255, 255, 0.03);
+            box-shadow: 0 4px 20px rgba(123, 44, 191, 0.08);
+        }
+        .strategy-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding-bottom: 8px;
+            margin-bottom: 4px;
+        }
+        .strategy-card-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            background: linear-gradient(to right, #fff, #b3c5ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .strategy-params-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        .param-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .param-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .param-input-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .param-unit {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+        .strategy-card .slider:before {
+            height: 12px;
+            width: 12px;
+            left: 4px;
+            bottom: 4px;
+        }
+        .strategy-card input:checked + .slider:before {
+            transform: translateX(18px);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo-container">
+            <div class="logo-symbol"></div>
+            <div class="logo-text">PolyYield</div>
+        </div>
+        <div class="network-banner" id="networkToggle" onclick="toggleNetwork()">
+            <div class="network-status-dot" id="networkDot"></div>
+            <span id="networkText" style="font-size: 14px; font-weight: 600; letter-spacing: 0.5px;">POLYGON MAINNET</span>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- Sidebar Controls & Config -->
+        <div class="sidebar">
+            <!-- Account Info -->
+            <div class="glass-panel">
+                <div class="panel-title">ACCOUNT STATUS</div>
+                <div>
+                    <span style="font-size: 12px; color: var(--text-secondary);">Wallet Balance</span>
+                    <div class="metric-value" id="walletBalance">
+                        $0.00 USDC
+                    </div>
+                </div>
+                <div style="margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between;">
+                    <button class="btn btn-emerald" onclick="openKeyModal()" style="padding: 6px 12px; font-size: 11px;">Configure Wallet</button>
+                    <button class="btn" onclick="fetchStats()" style="padding: 6px 12px; font-size: 11px;">Refresh Stats</button>
+                </div>
+                <div style="margin-top: 10px; display: flex; gap: 8px;">
+                    <button class="btn" onclick="paperDeposit()" style="padding: 6px 12px; font-size: 11px; background: linear-gradient(135deg, #1a5c3a, #0e3d25); border: 1px solid var(--cyber-emerald);">+ Add Paper Funds</button>
+                    <button class="btn" onclick="paperReset()" style="padding: 6px 12px; font-size: 11px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">Reset Balance</button>
+                </div>
+            </div>
+
+            <!-- Global Bot Toggles -->
+            <div class="glass-panel">
+                <div class="panel-title">CONTROL CENTER</div>
+                <div class="switch-container">
+                    <span class="switch-label">Live Trading Mode</span>
+                    <label class="switch">
+                        <input type="checkbox" id="modeSwitch" onchange="updateMode(this)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="switch-container">
+                    <span class="switch-label">Engine Enabled</span>
+                    <label class="switch">
+                        <input type="checkbox" id="engineSwitch" onchange="updateEngineState(this)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="switch-container">
+                    <span class="switch-label">Circuit Breaker</span>
+                    <label class="switch">
+                        <input type="checkbox" id="circuitBreakerSwitch" onchange="updateCircuitBreaker(this)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="control-group" style="margin-top: 20px;">
+                    <label class="control-label">Scan Interval (seconds)</label>
+                    <input type="number" id="scanInterval" class="control-input" value="120" onchange="updateScanInterval(this)">
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Max Drawdown Limit (%)</label>
+                    <input type="number" id="drawdownLimit" class="control-input" value="50" onchange="updateDrawdownLimit(this)">
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Daily Loss Limit (USDC)</label>
+                    <input type="number" id="dailyLossLimit" class="control-input" value="50.0" onchange="updateDailyLossLimit(this)">
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Consecutive Loss Limit</label>
+                    <input type="number" id="consecLossLimit" class="control-input" value="3" onchange="updateConsecLossLimit(this)">
+                </div>
+            </div>
+
+            <!-- Strategy Allocations sliders -->
+            <div class="glass-panel">
+                <div class="panel-title">RISK ALLOCATION</div>
+                <div class="control-group">
+                    <label class="control-label">Kelly Sizing Fraction (default: 0.10)</label>
+                    <input type="range" id="kellyFraction" min="0.05" max="0.5" step="0.05" value="0.10" style="width: 100%; cursor: pointer;" oninput="updateKellyFraction(this)">
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-top: 4px; color: var(--text-secondary);">
+                        <span>0.05</span>
+                        <span id="kellyFractionVal" style="color: var(--cyber-emerald); font-weight: 600;">0.10</span>
+                        <span>0.50</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Strategy Toggles -->
+            <div class="glass-panel">
+                <div class="panel-title">STRATEGY SWITCHES</div>
+                <div id="strategyToggles">
+                    <!-- Populated dynamically from config -->
+                </div>
+            </div>
+
+            <!-- Manual Trade Panel -->
+            <div class="glass-panel">
+                <div class="panel-title">MANUAL TRADE</div>
+                <div class="control-group">
+                    <label class="control-label">Market ID</label>
+                    <input type="text" id="manualMarketId" class="control-input" placeholder="e.g. 0x... or slug">
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Token ID</label>
+                    <input type="text" id="manualTokenId" class="control-input" placeholder="CLOB Token ID (optional)">
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Market Title</label>
+                    <input type="text" id="manualMarketTitle" class="control-input" value="Manual Trade">
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div class="control-group">
+                        <label class="control-label">Outcome</label>
+                        <select id="manualOutcome" class="control-input" style="background:#1b203c;">
+                            <option value="YES">YES</option>
+                            <option value="NO">NO</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label class="control-label">Price ($)</label>
+                        <input type="number" id="manualPrice" class="control-input" step="0.01" min="0.01" max="0.99" value="0.50">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Stake (USDC)</label>
+                    <input type="number" id="manualStake" class="control-input" min="1" value="10">
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div class="control-group">
+                        <label class="control-label">Stop Loss ($)</label>
+                        <input type="number" id="manualSL" class="control-input" step="0.01" placeholder="e.g. 0.45">
+                    </div>
+                    <div class="control-group">
+                        <label class="control-label">Take Profit ($)</label>
+                        <input type="number" id="manualTP" class="control-input" step="0.01" placeholder="e.g. 0.85">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Trailing Stop (%)</label>
+                    <input type="number" id="manualTS" class="control-input" placeholder="e.g. 10">
+                </div>
+                <button class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:10px;" onclick="placeManualTrade()">Submit Manual Trade</button>
+            </div>
+        </div>
+
+        <!-- Main Workspace -->
+        <div class="workspace">
+            <!-- Metric Cards -->
+            <div class="stats-grid">
+                <div class="glass-panel">
+                    <div style="font-size: 12px; color: var(--text-secondary);">Total PnL</div>
+                    <div class="metric-value" id="statTotalPnl">$0.00</div>
+                </div>
+                <div class="glass-panel">
+                    <div style="font-size: 12px; color: var(--text-secondary);">Win Rate</div>
+                    <div class="metric-value" id="statWinRate">0.0%</div>
+                </div>
+                <div class="glass-panel">
+                    <div style="font-size: 12px; color: var(--text-secondary);">Active Positions</div>
+                    <div class="metric-value" id="statActivePos">0</div>
+                </div>
+                <div class="glass-panel">
+                    <div style="font-size: 12px; color: var(--text-secondary);">Total Returned</div>
+                    <div class="metric-value" id="statCompounded">$0.00</div>
+                    <div class="metric-sub" id="statCompoundedSub"></div>
+                </div>
+            </div>
+
+            <!-- Opportunities Panel -->
+            <div class="glass-panel">
+                <div class="panel-title">
+                    ACTIVE SCANNER OPPORTUNITIES
+                    <span id="scannerStatus" style="font-size: 12px; color: var(--cyber-emerald); font-weight: 400;">● Engine Scanning</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>
+                                    Strategy
+                                    <input type="text" id="filterStrategy" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px;" placeholder="Filter..." oninput="filterOpportunities()">
+                                    <select id="filterRisk" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px; background:#1b203c;" onchange="filterOpportunities()">
+                                        <option value="">All Risks</option>
+                                        <option value="low">Low Risk</option>
+                                        <option value="medium">Medium Risk</option>
+                                        <option value="high">High Risk</option>
+                                    </select>
+                                </th>
+                                <th>
+                                    Market
+                                    <input type="text" id="filterMarket" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px;" placeholder="Filter..." oninput="filterOpportunities()">
+                                </th>
+                                <th>
+                                    Outcome
+                                    <select id="filterOutcome" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px; background:#1b203c;" onchange="filterOpportunities()">
+                                        <option value="">All</option>
+                                        <option value="yes">YES</option>
+                                        <option value="no">NO</option>
+                                    </select>
+                                </th>
+                                <th>
+                                    <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleSort('prob')">
+                                        <span>Implied Prob</span>
+                                        <span id="sort_prob" style="font-size:10px; opacity:0.5;">↕</span>
+                                    </div>
+                                    <input type="text" id="filterProb" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px;" placeholder="Filter..." oninput="filterOpportunities()">
+                                </th>
+                                <th>
+                                    <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleSort('apy')">
+                                        <span>Projected APY</span>
+                                        <span id="sort_apy" style="font-size:10px; opacity:0.5;">↕</span>
+                                    </div>
+                                    <input type="text" id="filterAPY" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px;" placeholder="Filter..." oninput="filterOpportunities()">
+                                </th>
+                                <th>
+                                    <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleSort('size')">
+                                        <span>Suggested Size</span>
+                                        <span id="sort_size" style="font-size:10px; opacity:0.5;">↕</span>
+                                    </div>
+                                </th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="opportunitiesBody">
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--text-secondary);">No opportunities found yet. Scanning...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Bot Strategy Manager -->
+            <div class="glass-panel">
+                <div class="panel-title" onclick="toggleBotManager()" style="cursor: pointer; user-select: none; display: flex; justify-content: space-between; align-items: center;">
+                    <span>BOT STRATEGY MANAGER</span>
+                    <span id="botManagerArrow" style="transition: transform 0.3s; font-size: 14px;">▼</span>
+                </div>
+                <div id="botManagerContent" style="display: none; margin-top: 20px;">
+                    <div class="strategy-grid" id="strategyManagerGrid">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Order Book Visualizer -->
+            <div class="glass-panel" id="orderbookPanel" style="display: none;">
+                <div class="panel-title">
+                    LIVE L2 ORDER BOOK
+                    <span id="obMarketTitle" style="font-size: 13px; color: var(--cyber-emerald);"></span>
+                </div>
+                <div class="orderbook-grid">
+                    <!-- Bids -->
+                    <div class="ob-side">
+                        <div class="ob-title">
+                            <span>Bids (Buy Orders)</span>
+                            <span>Size</span>
+                        </div>
+                        <div id="obBidsBody"></div>
+                    </div>
+                    <!-- Asks -->
+                    <div class="ob-side">
+                        <div class="ob-title">
+                            <span>Price</span>
+                            <span>Asks (Sell Orders)</span>
+                        </div>
+                        <div id="obAsksBody"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Positions & Trade Log -->
+            <div class="glass-panel">
+                <div class="panel-title">ACTIVE PORTFOLIO POSITIONS</div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Strategy</th>
+                                <th>Market</th>
+                                <th>Outcome</th>
+                                <th>Cost (USDC)</th>
+                                <th>Entry Price</th>
+                                <th>Mode</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positionsBody">
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Live Telemetry Logs -->
+            <div class="glass-panel">
+                <div class="panel-title">SYSTEM EVENT LOGS</div>
+                <div class="logs-panel" id="logsPanel">
+                    <div>[SYSTEM] PolyYield Engine booted. Connecting to telemetry feed...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Credentials Modal -->
+    <div class="modal" id="keyModal">
+        <div class="modal-content">
+            <h2 style="font-family: 'Space Grotesk', sans-serif; margin-bottom: 20px; font-weight: 600;">Wallet Cryptographic Setup</h2>
+            <div class="control-group">
+                <label class="control-label">Service Key Type</label>
+                <select id="keyService" class="control-input" style="background:#1b203c;">
+                    <option value="polymarket_wallet">Polymarket Private Wallet Key (Hot Wallet)</option>
+                    <option value="telegram_bot">Telegram Bot API Token</option>
+                    <option value="telegram_chat">Telegram Chat ID</option>
+                    <option value="discord_webhook">Discord Webhook URL</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label class="control-label">Secret Key Value</label>
+                <input type="password" id="keyValue" class="control-input" placeholder="0x...">
+            </div>
+            <div class="control-group">
+                <label class="control-label">Friendly Label</label>
+                <input type="text" id="keyLabel" class="control-input" placeholder="e.g. Master Wallet Key">
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <button class="btn" onclick="closeKeyModal()" style="background:transparent; border:1px solid rgba(255,255,255,0.1);">Cancel</button>
+                <button class="btn btn-emerald" onclick="submitKey()">Save Key</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Dialog Modal -->
+    <div class="modal" id="customDialogModal">
+        <div class="modal-content" style="max-width: 480px; text-align: center; border: 1px solid var(--border-glow); box-shadow: 0 0 30px rgba(111, 66, 193, 0.2);">
+            <div id="customDialogIcon" style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+            <h2 id="customDialogTitle" style="font-family: 'Space Grotesk', sans-serif; margin-bottom: 12px; font-weight: 600; color: #fff; font-size: 22px;">Alert</h2>
+            <p id="customDialogMessage" style="color: var(--text-secondary); font-size: 14px; line-height: 1.6; margin-bottom: 24px; white-space: pre-line; text-align: left;"></p>
+            
+            <div id="customDialogPromptContainer" style="display: none; margin-bottom: 24px; text-align: left;">
+                <input type="text" id="customDialogPromptInput" class="control-input" style="width: 100%; box-sizing: border-box; background: #1b203c;">
+            </div>
+            
+            <div style="display: flex; gap: 12px; justify-content: flex-end;" id="customDialogButtons">
+                <!-- Buttons will be injected dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Script logic -->
+    <script>
+        let ws;
+        let selectedTokenId = null;
+        let selectedMarketTitle = "";
+
+        const CustomDialog = {
+            _modal: null,
+            _title: null,
+            _message: null,
+            _icon: null,
+            _promptContainer: null,
+            _promptInput: null,
+            _buttons: null,
+            _resolve: null,
+
+            init() {
+                this._modal = document.getElementById("customDialogModal");
+                this._title = document.getElementById("customDialogTitle");
+                this._message = document.getElementById("customDialogMessage");
+                this._icon = document.getElementById("customDialogIcon");
+                this._promptContainer = document.getElementById("customDialogPromptContainer");
+                this._promptInput = document.getElementById("customDialogPromptInput");
+                this._buttons = document.getElementById("customDialogButtons");
+            },
+
+            show({ title, message, icon, type, defaultValue, placeholder }) {
+                if (!this._modal) this.init();
+
+                return new Promise((resolve) => {
+                    this._resolve = resolve;
+                    this._title.innerText = title || "Notification";
+                    this._message.innerText = message || "";
+                    this._icon.innerText = icon || "ℹ️";
+
+                    if (type === "prompt") {
+                        this._promptContainer.style.display = "block";
+                        this._promptInput.value = defaultValue || "";
+                        this._promptInput.placeholder = placeholder || "";
+                        setTimeout(() => this._promptInput.focus(), 100);
+                    } else {
+                        this._promptContainer.style.display = "none";
+                    }
+
+                    // Dynamically build buttons based on type
+                    this._buttons.innerHTML = "";
+                    if (type === "alert") {
+                        const btnOk = document.createElement("button");
+                        btnOk.className = "btn btn-emerald";
+                        btnOk.style.padding = "8px 24px";
+                        btnOk.innerText = "OK";
+                        btnOk.onclick = () => this.close(true);
+                        this._buttons.appendChild(btnOk);
+                    } else if (type === "confirm") {
+                        const btnCancel = document.createElement("button");
+                        btnCancel.className = "btn";
+                        btnCancel.style.background = "transparent";
+                        btnCancel.style.border = "1px solid rgba(255,255,255,0.1)";
+                        btnCancel.style.padding = "8px 20px";
+                        btnCancel.innerText = "Cancel";
+                        btnCancel.onclick = () => this.close(false);
+
+                        const btnOk = document.createElement("button");
+                        btnOk.className = "btn btn-emerald";
+                        btnOk.style.padding = "8px 24px";
+                        btnOk.innerText = "Confirm";
+                        btnOk.onclick = () => this.close(true);
+
+                        this._buttons.appendChild(btnCancel);
+                        this._buttons.appendChild(btnOk);
+                    } else if (type === "prompt") {
+                        const btnCancel = document.createElement("button");
+                        btnCancel.className = "btn";
+                        btnCancel.style.background = "transparent";
+                        btnCancel.style.border = "1px solid rgba(255,255,255,0.1)";
+                        btnCancel.style.padding = "8px 20px";
+                        btnCancel.innerText = "Cancel";
+                        btnCancel.onclick = () => this.close(null);
+
+                        const btnOk = document.createElement("button");
+                        btnOk.className = "btn btn-emerald";
+                        btnOk.style.padding = "8px 24px";
+                        btnOk.innerText = "Submit";
+                        btnOk.onclick = () => this.close(this._promptInput.value);
+
+                        this._buttons.appendChild(btnCancel);
+                        this._buttons.appendChild(btnOk);
+
+                        // Allow enter key to submit
+                        this._promptInput.onkeydown = (e) => {
+                            if (e.key === "Enter") {
+                                this.close(this._promptInput.value);
+                            }
+                        };
+                    }
+
+                    this._modal.classList.add("active");
+                });
+            },
+
+            close(result) {
+                if (this._modal) {
+                    this._modal.classList.remove("active");
+                }
+                if (this._resolve) {
+                    this._resolve(result);
+                    this._resolve = null;
+                }
+            },
+
+            alert(message, title = "Notification", icon = "⚠️") {
+                return this.show({ type: "alert", title, message, icon });
+            },
+
+            confirm(message, title = "Confirm Action", icon = "⚠️") {
+                return this.show({ type: "confirm", title, message, icon });
+            },
+
+            prompt(message, defaultValue = "", title = "Input Required", icon = "✏️") {
+                return this.show({ type: "prompt", title, message, icon, defaultValue });
+            }
+        };
+
+        // API Token Management & Global Fetch Interceptor
+        let apiToken = localStorage.getItem('poly_yield_token') || '';
+        const originalFetch = window.fetch;
+        window.fetch = async function(resource, config = {}) {
+            if (!config.headers) {
+                config.headers = {};
+            }
+            if (apiToken) {
+                config.headers['Authorization'] = `Bearer ${apiToken}`;
+            }
+            
+            let response = await originalFetch(resource, config);
+            if (response.status === 401) {
+                const tokenStr = await CustomDialog.prompt(
+                    "Unauthorized (401). Please enter your PolyYield API Secret:",
+                    "",
+                    "Authentication Required",
+                    "🔑"
+                );
+                if (tokenStr !== null) {
+                    apiToken = tokenStr.trim();
+                    localStorage.setItem('poly_yield_token', apiToken);
+                    config.headers['Authorization'] = `Bearer ${apiToken}`;
+                    response = await originalFetch(resource, config);
+                }
+            }
+            return response;
+        };
+
+        // Establish WebSocket connection
+        function connectWS() {
+            const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+            ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+
+            ws.onmessage = function(event) {
+                const msg = JSON.parse(event.data);
+                handleWSMessage(msg);
+            };
+
+            ws.onclose = function() {
+                setTimeout(connectWS, 2000); // Auto reconnect
+            };
+        }
+
+        function handleWSMessage(msg) {
+            if (msg.type === "welcome") {
+                // Populate configuration in UI
+                document.getElementById("modeSwitch").checked = msg.config["poly_yield.active_mode"] === "live";
+                document.getElementById("engineSwitch").checked = msg.config["poly_yield.enabled"] === "true";
+                document.getElementById("scanInterval").value = msg.config["poly_yield.scan_interval_s"] || 120;
+                document.getElementById("drawdownLimit").value = msg.config["poly_yield.auto_exec_drawdown_limit"] || 50;
+                document.getElementById("kellyFraction").value = msg.config["portfolio.kelly_fraction"] || 0.10;
+                document.getElementById("kellyFractionVal").innerText = msg.config["portfolio.kelly_fraction"] || "0.10";
+                document.getElementById("dailyLossLimit").value = msg.config["portfolio.daily_loss_limit"] || "50.0";
+                document.getElementById("consecLossLimit").value = msg.config["portfolio.consecutive_loss_limit"] || "3";
+                document.getElementById("circuitBreakerSwitch").checked = msg.config["portfolio.circuit_breaker_active"] === "true";
+                
+                updateChainIndicator(msg.config["polygon_chain_id"] || 137);
+                updateStatsUI(msg.stats);
+                buildStrategyToggles(msg.config);
+                fetchPositions();
+                syncStrategyManagerValues(msg.config);
+            }
+            else if (msg.type === "scan_complete") {
+                fetchOpportunities();
+                const statusEl = document.getElementById('scannerStatus');
+                if (statusEl) statusEl.innerText = `● Scan #${msg.scan_count} — ${msg.opps_found} opps`;
+            }
+            else if (msg.type === "opportunity_update") {
+                fetchOpportunities();
+            }
+            else if (msg.type === "position_opened" || msg.type === "position_settled") {
+                fetchPositions();
+                fetchStats();
+                logEvent(`[TRADE] Position status updated: ${msg.market || msg.pos_id}`);
+            }
+        }
+
+        let activeExpandedOppId = null;
+
+        let currentWalletBalance = 0;
+        let activeOpportunities = [];
+        let processedOppCache = [];
+        let currentSort = { col: null, dir: 'asc' };
+
+        function toggleSort(col) {
+            if (currentSort.col === col) {
+                currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.col = col;
+                currentSort.dir = 'desc'; // Default to desc for metrics
+            }
+            
+            // Update sort icons UI
+            ['prob', 'apy', 'size'].forEach(c => {
+                const el = document.getElementById(`sort_${c}`);
+                if (el) el.innerText = '↕';
+            });
+            const activeEl = document.getElementById(`sort_${col}`);
+            if (activeEl) activeEl.innerText = currentSort.dir === 'asc' ? '▲' : '▼';
+
+            filterOpportunities();
+        }
+
+        async function fetchWalletBalance() {
+            try {
+                const r = await fetch("/api/poly-yield/wallet-balance");
+                const data = await r.json();
+                currentWalletBalance = data.balance || 0;
+                document.getElementById("walletBalance").innerText = `$${currentWalletBalance.toFixed(2)} USDC`;
+                
+                // Re-render opportunities with new wallet balance percentage
+                if (activeOpportunities.length > 0) {
+                    filterOpportunities();
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // Fetch Scanner Opportunities
+        async function fetchOpportunities() {
+            try {
+                const r = await fetch("/api/poly-yield/opportunities");
+                const data = await r.json();
+                
+                activeOpportunities = data.filter(o => o.status === 'open');
+                
+                // Pre-process for SOTA fast search filtering
+                processedOppCache = activeOpportunities.map(opp => {
+                    const strategyKey = opp.strategy || "";
+                    const formattedName = formatStrategyName(strategyKey).toLowerCase();
+                    // Maps keys to their common search terms
+                    const searchAliases = {
+                        's1_novelty': 's1 novelty novelty yield s1_novelty',
+                        's2_split': 's2 split lp split share farm s2_split lp',
+                        's3_buy_all': 's3 buy-all buy all arb s3_buy_all arbitrage',
+                        's4_corr': 's4 corr arb correlation arb s4_corr correlation',
+                        's5_sub_event': 's5 sub-event sub event arb s5_sub_event subevent',
+                        's6_longshot': 's6 longshot longshot mm s6_longshot long shot',
+                        'favorite_compounding': 'fav compound favorite compounding favorite_compounding compounding',
+                        'copy_trading': 'copy trade copy trading copy_trading'
+                    };
+                    const searchStr = `${strategyKey.toLowerCase()} ${formattedName} ${searchAliases[strategyKey] || ""}`;
+
+                    return {
+                        id: opp.id,
+                        strategy: formattedName,
+                        strategySearch: searchStr,
+                        risk: (opp.risk_level || "").toLowerCase(),
+                        market: (opp.market_title || "").toLowerCase(),
+                        outcome: (opp.outcome || "").toLowerCase(),
+                        probStr: opp.implied_prob != null ? opp.implied_prob.toString().toLowerCase() + "%" : "n/a",
+                        apyStr: opp.annualized_apy != null ? opp.annualized_apy.toString().toLowerCase() + "%" : "n/a",
+                        probVal: opp.implied_prob || 0,
+                        apyVal: opp.annualized_apy || 0,
+                        sizeVal: opp.suggested_usdc || 0,
+                        original: opp
+                    };
+                });
+                
+                filterOpportunities();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function filterOpportunities() {
+            const tbody = document.getElementById("opportunitiesBody");
+            
+            if (processedOppCache.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No opportunities found yet. Scanning...</td></tr>`;
+                return;
+            }
+
+            const fStrategy = (document.getElementById("filterStrategy")?.value || "").toLowerCase();
+            const fRisk = (document.getElementById("filterRisk")?.value || "").toLowerCase();
+            const fMarket = (document.getElementById("filterMarket")?.value || "").toLowerCase();
+            const fOutcome = (document.getElementById("filterOutcome")?.value || "").toLowerCase();
+            const fProb = (document.getElementById("filterProb")?.value || "").toLowerCase();
+            const fAPY = (document.getElementById("filterAPY")?.value || "").toLowerCase();
+
+            // Very fast filter pass
+            let filtered = processedOppCache.filter(item => {
+                if (lastConfigData && lastConfigData[`${item.original.strategy}.enabled`] === 'false') {
+                    return false;
+                }
+                return (!fStrategy || item.strategySearch.includes(fStrategy)) &&
+                       (!fRisk || item.risk === fRisk) &&
+                       (!fMarket || item.market.includes(fMarket)) &&
+                       (!fOutcome || item.outcome.includes(fOutcome)) &&
+                       (!fProb || item.probStr.includes(fProb)) &&
+                       (!fAPY || item.apyStr.includes(fAPY));
+            });
+
+            // Fast sort pass
+            if (currentSort.col) {
+                const dir = currentSort.dir === 'asc' ? 1 : -1;
+                filtered.sort((a, b) => {
+                    let valA = a[currentSort.col + 'Val'];
+                    let valB = b[currentSort.col + 'Val'];
+                    return (valA - valB) * dir;
+                });
+            }
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No matching opportunities.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(item => {
+                const opp = item.original;
+                let sizeText = `$${opp.suggested_usdc || '0'}`;
+                if (currentWalletBalance > 0 && opp.suggested_usdc) {
+                    const pct = ((opp.suggested_usdc / currentWalletBalance) * 100).toFixed(1);
+                    sizeText += ` <br><span style="font-size:10px; color:var(--text-secondary);">(${pct}%)</span>`;
+                }
+                return `
+                    <tr onclick="toggleOppDetails('${opp.id}', '${opp.token_id || ''}', '${escapeHtml(opp.market_title || '')}')" style="cursor:pointer;">
+                        <td><span class="badge ${getRiskBadge(opp.risk_level)}">${formatStrategyName(opp.strategy)}</span></td>
+                        <td style="max-width:300px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(opp.market_title || '')}">${escapeHtml(opp.market_title || '')}</td>
+                        <td><span style="color:var(--cyber-emerald); font-weight:600;">${opp.outcome || ''}</span></td>
+                        <td>${opp.implied_prob != null ? opp.implied_prob + '%' : 'N/A'}</td>
+                        <td><span style="color:var(--cyber-emerald); font-weight:600;">${opp.annualized_apy != null ? opp.annualized_apy + '%' : 'N/A'}</span>${opp.days_to_expiry != null && opp.days_to_expiry < 7 ? '<br><span style="font-size:10px;color:var(--alert-orange)">short-term</span>' : ''}</td>
+                        <td>${sizeText}</td>
+                        <td>
+                            <button class="btn btn-emerald" id="exec_${opp.id}" onclick="executeTrade('${opp.id}', event)" style="padding:6px 12px; font-size:11px;">${opp.exec_mode === 'manual' ? 'Manual Only' : 'Execute'}</button>
+                        </td>
+                    </tr>
+                    <tr id="details_${opp.id}" style="display:none; background: rgba(255,255,255,0.015);">
+                        <td colspan="7" style="padding: 16px 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                            <div style="display:flex; justify-content:space-between; gap:40px; align-items:center;">
+                                <div style="display:flex; flex-direction:column; gap:8px; font-size:12px; flex:1;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span style="color:var(--text-secondary); width:80px; font-weight:600;">Market ID:</span>
+                                        <code style="background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px; color:#b3c5ff; font-family:monospace; font-size:11px;">${opp.market_id || 'N/A'}</code>
+                                        <button class="btn" onclick="copyText('${opp.market_id || ''}', event)" style="padding:2px 6px; font-size:10px; background:rgba(255,255,255,0.05);">Copy</button>
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span style="color:var(--text-secondary); width:80px; font-weight:600;">Token ID:</span>
+                                        <code style="background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px; color:#b3c5ff; font-family:monospace; font-size:11px;">${opp.token_id || 'N/A'}</code>
+                                        <button class="btn" onclick="copyText('${opp.token_id || ''}', event)" style="padding:2px 6px; font-size:10px; background:rgba(255,255,255,0.05);">Copy</button>
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span style="color:var(--text-secondary); width:80px; font-weight:600;">Market Link:</span>
+                                        <a href="${opp.market_url || 'https://polymarket.com/market/' + opp.market_id}" target="_blank" style="color:var(--cyber-emerald); text-decoration:none;" onclick="event.stopPropagation();">Open in Polymarket ↗</a>
+                                    </div>
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+                                    <button class="btn btn-emerald" onclick="autofillManualTrade('${opp.market_id || ''}', '${opp.token_id || ''}', '${escapeHtml(opp.market_title || '')}', '${opp.outcome || 'YES'}', ${opp.entry_price || 0.50}, event)" style="padding:6px 12px; font-size:11px;">
+                                        ⚡ Auto-Fill Manual Trade Form
+                                    </button>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join("");
+
+            // Restore expanded state if still exists in the data
+            if (activeExpandedOppId) {
+                const el = document.getElementById(`details_${activeExpandedOppId}`);
+                if (el) {
+                    el.style.display = "table-row";
+                }
+            }
+        }
+
+        function toggleOppDetails(oppId, tokenId, marketTitle) {
+            const el = document.getElementById(`details_${oppId}`);
+            if (!el) return;
+            const isVisible = el.style.display !== "none";
+            
+            // Collapse all other detail rows first (to keep table clean)
+            const detailRows = document.querySelectorAll("[id^='details_']");
+            detailRows.forEach(row => { row.style.display = "none"; });
+            
+            // Toggle clicked row
+            if (!isVisible) {
+                el.style.display = "table-row";
+                activeExpandedOppId = oppId;
+                loadOrderBook(tokenId, marketTitle);
+            } else {
+                activeExpandedOppId = null;
+            }
+        }
+
+        function copyText(text, event) {
+            event.stopPropagation();
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = event.target;
+                const originalText = btn.innerText;
+                btn.innerText = "Copied!";
+                btn.style.background = "var(--cyber-emerald)";
+                btn.style.color = "#0b0d19";
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.style.background = "";
+                    btn.style.color = "";
+                }, 1500);
+            });
+        }
+
+        function autofillManualTrade(marketId, tokenId, marketTitle, outcome, price, event) {
+            event.stopPropagation();
+            
+            document.getElementById("manualMarketId").value = marketId;
+            document.getElementById("manualTokenId").value = tokenId && tokenId !== 'None' ? tokenId : '';
+            document.getElementById("manualMarketTitle").value = marketTitle;
+            
+            const outcomeSelect = document.getElementById("manualOutcome");
+            if (outcomeSelect) {
+                const upperOutcome = outcome.toUpperCase();
+                if (upperOutcome === "YES" || upperOutcome === "NO") {
+                    outcomeSelect.value = upperOutcome;
+                } else {
+                    outcomeSelect.value = upperOutcome.includes("YES") ? "YES" : "NO";
+                }
+            }
+            
+            document.getElementById("manualPrice").value = price || 0.50;
+            
+            logEvent(`[SYSTEM] Auto-filled manual trade form for: "${marketTitle}"`);
+            
+            const manualPanel = document.getElementById("manualMarketId").closest(".glass-panel");
+            if (manualPanel) {
+                manualPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+                manualPanel.style.borderColor = "var(--cyber-emerald)";
+                manualPanel.style.boxShadow = "0 0 20px rgba(5, 255, 201, 0.3)";
+                setTimeout(() => {
+                    manualPanel.style.borderColor = "";
+                    manualPanel.style.boxShadow = "";
+                }, 2000);
+            }
+        }
+
+        // Fetch Active Portfolio Positions
+        async function fetchPositions() {
+            try {
+                const r = await fetch("/api/poly-yield/positions");
+                const data = await r.json();
+                const tbody = document.getElementById("positionsBody");
+
+                if (data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No active positions. Trigger a trade to start.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = data.map(pos => `
+                    <tr>
+                        <td><span class="badge ${getRiskBadge(pos.risk_level)}">${formatStrategyName(pos.strategy)}</span></td>
+                        <td style="max-width:300px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(pos.market_title || '')}">${escapeHtml(pos.market_title || '')}</td>
+                        <td><span style="color:var(--cyber-emerald);">${pos.outcome || ''}</span></td>
+                        <td>$${(pos.cost_usdc || 0).toFixed(2)}</td>
+                        <td>$${(pos.entry_price || 0).toFixed(4)}</td>
+                        <td><span style="text-transform:uppercase; font-size:11px; font-weight:600; color: ${pos.mode==='live' ? 'var(--hot-pink)' : 'var(--text-secondary)'}">${pos.mode || 'paper'}</span></td>
+                        <td><span style="color: ${pos.status === 'open' ? 'var(--alert-orange)' : pos.status === 'won' ? 'var(--cyber-emerald)' : 'var(--hot-pink)'}; font-weight:600; text-transform:capitalize;">${pos.status}${pos.realized_pnl != null && pos.status !== 'open' ? ' (' + (pos.realized_pnl >= 0 ? '+' : '') + '$' + pos.realized_pnl.toFixed(2) + ')' : ''}</span></td>
+                        <td>
+                            ${pos.status === 'open' ? `<button class="btn" style="background:linear-gradient(135deg, var(--hot-pink), #cc005f); padding:4px 8px; font-size:11px;" onclick="exitPositionPrompt('${pos.id}', ${pos.entry_price})">Exit</button>` : `<span style="color:var(--text-secondary); font-size:11px;">—</span>`}
+                        </td>
+                    </tr>
+                `).join("");
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // Fetch Stats
+        async function fetchStats() {
+            try {
+                const r = await fetch("/api/poly-yield/stats");
+                const stats = await r.json();
+                updateStatsUI(stats);
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        let lastKnownStats = [];
+
+        function updateStatsUI(stats) {
+            if (stats) lastKnownStats = stats;
+            const dataToUse = lastKnownStats;
+            
+            const modeSwitch = document.getElementById("modeSwitch");
+            const currentMode = modeSwitch && modeSwitch.checked ? "live" : "paper";
+
+            let totalPnl = 0;
+            let totalReturned = 0;
+            let wins = 0;
+            let losses = 0;
+            let active = 0;
+
+            if (dataToUse && dataToUse.length > 0) {
+                dataToUse.forEach(s => {
+                    if (s.mode !== currentMode) return;
+                    totalPnl += s.total_pnl || 0;
+                    totalReturned += s.total_returned || 0;
+                    wins += s.win_count || 0;
+                    losses += s.loss_count || 0;
+                    active += s.open_positions || 0;
+                });
+            }
+
+            const winRate = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0.0;
+
+            document.getElementById("statTotalPnl").innerText = (totalPnl >= 0 ? "+" : "") + `$${totalPnl.toFixed(2)}`;
+            document.getElementById("statTotalPnl").style.color = totalPnl >= 0 ? "var(--cyber-emerald)" : "var(--hot-pink)";
+            document.getElementById("statWinRate").innerText = `${winRate.toFixed(1)}%`;
+            document.getElementById("statActivePos").innerText = active;
+            document.getElementById("statCompounded").innerText = (totalReturned >= 0 ? "+" : "") + `$${totalReturned.toFixed(2)}`;
+            document.getElementById("statCompounded").style.color = totalReturned >= 0 ? "var(--cyber-emerald)" : "var(--hot-pink)";
+            document.getElementById("statCompoundedSub").innerText = `${wins + losses} settled / ${active} open`;
+        }
+
+        // Order Book L2 Loader
+        async function loadOrderBook(tokenId, marketTitle) {
+            if (!tokenId || tokenId === "None" || tokenId === "null") return;
+            selectedTokenId = tokenId;
+            selectedMarketTitle = marketTitle;
+            
+            document.getElementById("orderbookPanel").style.display = "block";
+            document.getElementById("obMarketTitle").innerText = `(${marketTitle})`;
+            
+            try {
+                const r = await fetch(`/api/poly-yield/orderbook/${tokenId}`);
+                const data = await r.json();
+                
+                const bidsBody = document.getElementById("obBidsBody");
+                const asksBody = document.getElementById("obAsksBody");
+
+                const bids = data.bids || [];
+                const asks = data.asks || [];
+
+                bidsBody.innerHTML = bids.slice(0, 8).map(b => `
+                    <div class="ob-row">
+                        <div class="ob-bar bid" style="width: ${Math.min(100, (b.size/1000)*100)}%;"></div>
+                        <span class="ob-val" style="color:var(--cyber-emerald); font-weight:600;">$${b.price}</span>
+                        <span class="ob-val">${parseFloat(b.size).toFixed(0)}</span>
+                    </div>
+                `).join("") || `<div style="text-align:center; padding:20px; color:var(--text-secondary);">No Bids</div>`;
+
+                asksBody.innerHTML = asks.slice(0, 8).map(a => `
+                    <div class="ob-row">
+                        <div class="ob-bar" style="width: ${Math.min(100, (a.size/1000)*100)}%;"></div>
+                        <span class="ob-val" style="font-weight:600;">$${a.price}</span>
+                        <span class="ob-val">${parseFloat(a.size).toFixed(0)}</span>
+                    </div>
+                `).join("") || `<div style="text-align:center; padding:20px; color:var(--text-secondary);">No Asks</div>`;
+
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // Execute manually
+        async function executeTrade(oppId, event) {
+            event.stopPropagation();
+            const btn = document.getElementById(`exec_${oppId}`);
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = 'Executing...';
+                btn.style.opacity = '0.5';
+            }
+            logEvent(`[ENGINE] Manually executing opportunity ${oppId}...`);
+            try {
+                const r = await fetch(`/api/poly-yield/execute/${oppId}`, { method: "POST" });
+                const res = await r.json();
+                if (r.ok) {
+                    logEvent(`[ENGINE] Execution SUCCESS: ${oppId}`);
+                    if (btn) { btn.innerText = '✓ Done'; btn.style.background = 'var(--cyber-emerald)'; }
+                    fetchPositions();
+                    fetchStats();
+                    fetchWalletBalance();
+                } else {
+                    logEvent(`[ENGINE] Execution DENIED: ${res.detail || res.error || "Error"}`);
+                    if (btn) { btn.innerText = 'Failed'; btn.style.background = 'var(--hot-pink)'; }
+                }
+            } catch (e) {
+                logEvent(`[ENGINE] Execution failure: ${e}`);
+                if (btn) { btn.innerText = 'Error'; btn.style.background = 'var(--hot-pink)'; }
+            }
+            // Re-enable after 3 seconds
+            setTimeout(() => {
+                if (btn) { btn.disabled = false; btn.innerText = 'Execute'; btn.style.opacity = '1'; btn.style.background = ''; }
+            }, 3000);
+        }
+
+        // Dynamic config setters
+        async function updateMode(el) {
+            if (el.checked) {
+                const confirmed = await CustomDialog.confirm(
+                    'WARNING: Switching to LIVE MODE will use REAL MONEY from your wallet.\n\nAre you absolutely sure?',
+                    'Live Mode Activation',
+                    '🚨'
+                );
+                if (!confirmed) {
+                    el.checked = false;
+                    return;
+                }
+            }
+            const mode = el.checked ? "live" : "paper";
+            logEvent(`[SYSTEM] Switched active mode to: ${mode.toUpperCase()}`);
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: "poly_yield.active_mode", value: mode })
+            });
+            setTimeout(fetchWalletBalance, 500); // Refresh balance UI
+            updateStatsUI(); // Immediately refresh stats for new mode
+        }
+
+        async function updateEngineState(el) {
+            const state = el.checked ? "true" : "false";
+            logEvent(`[SYSTEM] Engine enabled: ${state.toUpperCase()}`);
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: "poly_yield.enabled", value: state })
+            });
+        }
+
+        async function updateScanInterval(el) {
+            const val = parseInt(el.value);
+            logEvent(`[SYSTEM] Scan interval set to ${val}s`);
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: "poly_yield.scan_interval_s", value: val.toString() })
+            });
+        }
+
+        async function updateDrawdownLimit(el) {
+            const val = parseFloat(el.value);
+            logEvent(`[SYSTEM] Drawdown limit set to ${val}%`);
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: "poly_yield.auto_exec_drawdown_limit", value: val.toString() })
+            });
+        }
+
+        async function updateKellyFraction(el) {
+            const val = parseFloat(el.value);
+            document.getElementById("kellyFractionVal").innerText = val.toFixed(2);
+            logEvent(`[SYSTEM] Kelly Sizing fraction set to ${val}`);
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: "portfolio.kelly_fraction", value: val.toString() })
+            });
+        }
+
+        async function updateDailyLossLimit(el) {
+            const val = parseFloat(el.value);
+            logEvent(`[SYSTEM] Daily loss limit set to $${val}`);
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: "portfolio.daily_loss_limit", value: val.toString() })
+            });
+        }
+
+        async function updateConsecLossLimit(el) {
+            const val = parseInt(el.value);
+            logEvent(`[SYSTEM] Consecutive loss limit set to ${val}`);
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: "portfolio.consecutive_loss_limit", value: val.toString() })
+            });
+        }
+
+        async function updateCircuitBreaker(el) {
+            const state = el.checked ? "true" : "false";
+            logEvent(`[SYSTEM] Circuit Breaker active: ${state.toUpperCase()}`);
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: "portfolio.circuit_breaker_active", value: state })
+            });
+        }
+
+        // Toggle Amoy / Mainnet chains
+        async function toggleNetwork() {
+            const currentText = document.getElementById("networkText").innerText;
+            let targetChainId = 137;
+            if (currentText.includes("MAINNET")) {
+                targetChainId = 80002;
+            }
+            
+            logEvent(`[SYSTEM] Switched Polygon network to: Chain ${targetChainId}`);
+            updateChainIndicator(targetChainId);
+            
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: "polygon_chain_id", value: targetChainId.toString() })
+            });
+        }
+
+        function updateChainIndicator(chainId) {
+            const text = document.getElementById("networkText");
+            const dot = document.getElementById("networkDot");
+            
+            if (parseInt(chainId) === 80002) {
+                text.innerText = "POLYGON AMOY TESTNET";
+                text.style.color = "var(--alert-orange)";
+                dot.className = "network-status-dot amoy";
+            } else {
+                text.innerText = "POLYGON MAINNET";
+                text.style.color = "var(--cyber-emerald)";
+                dot.className = "network-status-dot";
+            }
+        }
+
+        // Credentials Modal controls
+        function openKeyModal() {
+            document.getElementById("keyModal").className = "modal active";
+        }
+
+        function closeKeyModal() {
+            document.getElementById("keyModal").className = "modal";
+        }
+
+        async function submitKey() {
+            const service = document.getElementById("keyService").value;
+            const value = document.getElementById("keyValue").value;
+            const label = document.getElementById("keyLabel").value;
+
+            if (!value) return;
+
+            logEvent(`[SYSTEM] Saving keys for service: ${service}...`);
+            try {
+                const r = await fetch("/api/poly-yield/keys", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ service, value, label })
+                });
+                if (r.ok) {
+                    logEvent(`[SYSTEM] Encrypted key for ${service} stored successfully.`);
+                    closeKeyModal();
+                } else {
+                    logEvent(`[SYSTEM] Key storage failed.`);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // Helpers
+        function logEvent(msg) {
+            const panel = document.getElementById("logsPanel");
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.textContent = `[${time}] ${msg}`;
+            panel.appendChild(entry);
+            // Cap at 100 entries to prevent memory bloat
+            while (panel.children.length > 100) {
+                panel.removeChild(panel.firstChild);
+            }
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        function getRiskBadge(level) {
+            if (level === "Low") return "badge-low";
+            if (level === "Medium") return "badge-med";
+            return "badge-high";
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+
+        function formatStrategyName(key) {
+            if (!key) return 'Unknown';
+            const names = {
+                's1_novelty': 'S1 Novelty',
+                's2_split': 'S2 Split LP',
+                's3_buy_all': 'S3 Buy-All',
+                's4_corr': 'S4 Corr Arb',
+                's5_sub_event': 'S5 Sub-Event',
+                's6_longshot': 'S6 Longshot',
+                'favorite_compounding': 'Fav Compound',
+                'copy_trading': 'Copy Trade'
+            };
+            return names[key] || key;
+        }
+
+        function buildStrategyToggles(config) {
+            const strategies = strategiesList;
+            const container = document.getElementById('strategyToggles');
+            if (!container) return;
+            container.innerHTML = strategies.map(s => {
+                const enabled = config && config[`${s.key}.enabled`] === 'true';
+                return `
+                    <div class="switch-container">
+                        <span class="switch-label" style="font-size:13px;">${s.label}</span>
+                        <label class="switch">
+                            <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleStrategy('${s.key}', this)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>`;
+            }).join('');
+        }
+
+        async function toggleStrategy(key, el) {
+            const val = el.checked ? 'true' : 'false';
+            logEvent(`[SYSTEM] Strategy ${key} ${el.checked ? 'ENABLED' : 'DISABLED'}`);
+            await fetch('/api/poly-yield/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: `${key}.enabled`, value: val })
+            });
+        }
+
+        async function placeManualTrade() {
+            const marketId = document.getElementById("manualMarketId").value.trim();
+            const tokenId = document.getElementById("manualTokenId").value.trim() || null;
+            const marketTitle = document.getElementById("manualMarketTitle").value.trim() || "Manual Trade";
+            const outcome = document.getElementById("manualOutcome").value;
+            const price = parseFloat(document.getElementById("manualPrice").value);
+            const stake = parseFloat(document.getElementById("manualStake").value);
+            
+            const sl_val = document.getElementById("manualSL").value.trim();
+            const tp_val = document.getElementById("manualTP").value.trim();
+            const ts_val = document.getElementById("manualTS").value.trim();
+
+            const stop_loss_price = sl_val ? parseFloat(sl_val) : null;
+            const take_profit_price = tp_val ? parseFloat(tp_val) : null;
+            const trailing_stop_pct = ts_val ? parseFloat(ts_val) : null;
+
+            if (!marketId || isNaN(price) || isNaN(stake)) {
+                await CustomDialog.alert("Please fill in Market ID, Price, and Stake.", "Missing Fields", "⚠️");
+                return;
+            }
+
+            logEvent(`[SYSTEM] Placing manual trade for ${marketTitle}...`);
+            try {
+                const r = await fetch("/api/poly-yield/manual-trade", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        market_id: marketId,
+                        outcome: outcome,
+                        stake_usdc: stake,
+                        price: price,
+                        stop_loss_price: stop_loss_price,
+                        take_profit_price: take_profit_price,
+                        trailing_stop_pct: trailing_stop_pct,
+                        token_id: tokenId,
+                        market_title: marketTitle
+                    })
+                });
+                const res = await r.json();
+                if (r.ok) {
+                    logEvent(`[SYSTEM] Manual trade placement SUCCESS: ${res.order_id || 'simulated'}`);
+                    fetchPositions();
+                    fetchStats();
+                    fetchWalletBalance();
+                    // Clear inputs
+                    document.getElementById("manualMarketId").value = "";
+                    document.getElementById("manualTokenId").value = "";
+                    document.getElementById("manualSL").value = "";
+                    document.getElementById("manualTP").value = "";
+                    document.getElementById("manualTS").value = "";
+                } else {
+                    logEvent(`[SYSTEM] Manual trade placement DENIED: ${res.detail || "Error"}`);
+                }
+            } catch (e) {
+                logEvent(`[SYSTEM] Manual trade failure: ${e}`);
+            }
+        }
+
+        async function exitPositionPrompt(posId, entryPrice) {
+            const exitPriceStr = await CustomDialog.prompt(
+                `Enter exit price (USDC per share) for position:`,
+                entryPrice.toFixed(2),
+                "Exit Position",
+                "💰"
+            );
+            if (exitPriceStr === null || exitPriceStr.trim() === "") return; // User cancelled
+            
+            const current_price = parseFloat(exitPriceStr);
+            if (isNaN(current_price) || current_price <= 0) {
+                await CustomDialog.alert("Please enter a valid positive number.", "Invalid Price", "❌");
+                return;
+            }
+
+            logEvent(`[SYSTEM] Exiting position ${posId} at $${current_price}...`);
+            try {
+                const r = await fetch(`/api/poly-yield/exit/${posId}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ current_price })
+                });
+                const res = await r.json();
+                if (r.ok) {
+                    logEvent(`[SYSTEM] Position exited successfully. Realized PnL: $${res.realized_pnl.toFixed(2)}`);
+                    fetchPositions();
+                    fetchStats();
+                    fetchWalletBalance();
+                } else {
+                    logEvent(`[SYSTEM] Exit DENIED: ${res.detail || "Error"}`);
+                }
+            } catch (e) {
+                logEvent(`[SYSTEM] Exit failure: ${e}`);
+            }
+        }
+
+        // Paper wallet fund management
+        async function paperDeposit() {
+            const amountStr = await CustomDialog.prompt(
+                'Enter amount to deposit into paper wallet (USDC):',
+                '100',
+                'Deposit Funds',
+                '💵'
+            );
+            if (amountStr === null || amountStr.trim() === "") return;
+            const amount = parseFloat(amountStr);
+            if (isNaN(amount) || amount <= 0) {
+                await CustomDialog.alert('Please enter a valid positive number.', 'Invalid Amount', '❌');
+                return;
+            }
+            logEvent(`[SYSTEM] Depositing $${amount.toFixed(2)} to paper wallet...`);
+            try {
+                const r = await fetch('/api/poly-yield/paper-deposit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount })
+                });
+                const res = await r.json();
+                if (r.ok) {
+                    logEvent(`[SYSTEM] Paper deposit SUCCESS. New balance: $${res.balance.toFixed(2)}`);
+                    fetchWalletBalance();
+                } else {
+                    logEvent(`[SYSTEM] Paper deposit DENIED: ${res.detail || 'Error'}`);
+                }
+            } catch (e) {
+                logEvent(`[SYSTEM] Paper deposit failure: ${e}`);
+            }
+        }
+
+        async function paperReset() {
+            const amountStr = await CustomDialog.prompt(
+                'Reset paper wallet balance to (USDC):',
+                '1000',
+                'Reset Balance',
+                '🔄'
+            );
+            if (amountStr === null || amountStr.trim() === "") return;
+            const amount = parseFloat(amountStr);
+            if (isNaN(amount) || amount < 0) {
+                await CustomDialog.alert('Please enter a valid non-negative number.', 'Invalid Amount', '❌');
+                return;
+            }
+            const confirmed = await CustomDialog.confirm(
+                `This will reset your paper balance to $${amount.toFixed(2)}.\n\nAll existing paper positions will keep their current state but won't affect the new balance.`,
+                'Reset Warning',
+                '⚠️'
+            );
+            if (!confirmed) {
+                return;
+            }
+            logEvent(`[SYSTEM] Resetting paper wallet to $${amount.toFixed(2)}...`);
+            try {
+                const r = await fetch('/api/poly-yield/paper-reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount })
+                });
+                const res = await r.json();
+                if (r.ok) {
+                    logEvent(`[SYSTEM] Paper wallet RESET to $${res.balance.toFixed(2)}`);
+                    fetchWalletBalance();
+                    fetchStats();
+                } else {
+                    logEvent(`[SYSTEM] Paper reset DENIED: ${res.detail || 'Error'}`);
+                }
+            } catch (e) {
+                logEvent(`[SYSTEM] Paper reset failure: ${e}`);
+            }
+        }
+
+        // Bot Strategy Manager configuration list
+        const strategiesList = [
+            {
+                key: 's1_novelty',
+                label: 'S1 Novelty Yield',
+                params: [
+                    { key: 'max_yes_price', label: 'Max YES Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's2_split',
+                label: 'S2 Split Share LP',
+                params: [
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's3_buy_all',
+                label: 'S3 Buy-All Arb',
+                params: [
+                    { key: 'min_profit_pct', label: 'Min Profit', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's4_corr',
+                label: 'S4 Correlation Arb',
+                params: [
+                    { key: 'min_gap_pct', label: 'Min Gap', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's5_sub_event',
+                label: 'S5 Sub-Event Arb',
+                params: [
+                    { key: 'min_gap_pct', label: 'Min Gap', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's6_longshot',
+                label: 'S6 Longshot MM',
+                params: [
+                    { key: 'max_yes_price', label: 'Max YES Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'max_positions', label: 'Max Positions', type: 'number', step: '1', unit: 'cnt' },
+                    { key: 'position_pct', label: 'Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 'favorite_compounding',
+                label: 'Favorite Compounding',
+                params: [
+                    { key: 'min_yes_price', label: 'Min YES Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'max_days_left', label: 'Max Days Left', type: 'number', step: '0.5', unit: 'days' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 'copy_trading',
+                label: 'Copy Trading',
+                params: [
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            { key: 's8_late_stage', label: 'S8 Late Stage Yield', params: [] },
+            { key: 's9_stablecoin_peg', label: 'S9 Stablecoin Peg Arb', params: [] },
+            { key: 's10_oracle', label: 'S10 Oracle Discrepancy', params: [] },
+            { key: 's11_overreaction', label: 'S11 Overreaction Scalp', params: [] },
+            { key: 's12_momentum', label: 'S12 Trend Momentum', params: [] },
+            { key: 's13_sentiment', label: 'S13 Sentiment Tracker', params: [] },
+            { key: 's14_macro_corr', label: 'S14 Macro Correlation', params: [] },
+            { key: 's15_theta', label: 'S15 Theta Harvester', params: [] },
+            { key: 's16_poll_drift', label: 'S16 Poll Drift', params: [] },
+            { key: 's17_sniper', label: 'S17 Liquidity Sniper', params: [] },
+            { key: 's18_straddle', label: 'S18 Catalyst Straddle', params: [] },
+            { key: 's19_longshot_yes', label: 'S19 Longshot YES', params: [] }
+        ];
+
+        let isStrategyGridBuilt = false;
+        let lastConfigData = null;
+
+        function toggleBotManager() {
+            const content = document.getElementById("botManagerContent");
+            const arrow = document.getElementById("botManagerArrow");
+            if (content.style.display === "none") {
+                content.style.display = "block";
+                arrow.style.transform = "rotate(180deg)";
+                renderStrategyManagerGrid();
+            } else {
+                content.style.display = "none";
+                arrow.style.transform = "rotate(0deg)";
+            }
+        }
+
+        function renderStrategyManagerGrid() {
+            if (isStrategyGridBuilt) return;
+            const grid = document.getElementById("strategyManagerGrid");
+            if (!grid) return;
+            
+            grid.innerHTML = strategiesList.map(s => {
+                const paramInputs = s.params.map(p => {
+                    const fullKey = `${s.key}.${p.key}`;
+                    return `
+                        <div class="param-field">
+                            <span class="param-label">${p.label}</span>
+                            <div class="param-input-container">
+                                <input type="number" id="param_${fullKey}" class="control-input" step="${p.step}" onchange="saveStrategyParam('${fullKey}', this, ${p.multiplier || 1})" style="padding: 6px 10px; font-size: 12px;">
+                                <span class="param-unit">${p.unit}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join("");
+                
+                return `
+                    <div class="strategy-card">
+                        <div class="strategy-card-header">
+                            <span class="strategy-card-title">${s.label}</span>
+                            <label class="switch" style="width:38px; height:20px;">
+                                <input type="checkbox" id="enable_${s.key}" onchange="toggleStrategyState('${s.key}', this)">
+                                <span class="slider" style="border-radius:20px;"></span>
+                            </label>
+                        </div>
+                        <div class="control-group" style="margin-bottom: 8px;">
+                            <span class="param-label">Execution Mode</span>
+                            <select id="mode_${s.key}" class="control-input" onchange="saveStrategyMode('${s.key}', this)" style="background:#1b203c; padding: 6px 10px; font-size: 12px; height: 28px; line-height: 12px; margin-top: 4px;">
+                                <option value="manual">Manual (Read Only)</option>
+                                <option value="semi">Semi-Auto (Approval Req)</option>
+                                <option value="auto">Auto (Bot Executes)</option>
+                            </select>
+                        </div>
+                        <div class="strategy-params-grid">
+                            ${paramInputs}
+                        </div>
+                    </div>
+                `;
+            }).join("");
+            
+            isStrategyGridBuilt = true;
+            
+            if (lastConfigData) {
+                syncStrategyManagerValues(lastConfigData);
+            }
+        }
+
+        function syncStrategyManagerValues(config) {
+            lastConfigData = config;
+            if (!isStrategyGridBuilt) return;
+            
+            strategiesList.forEach(s => {
+                const enableEl = document.getElementById(`enable_${s.key}`);
+                if (enableEl) {
+                    enableEl.checked = config[`${s.key}.enabled`] === 'true';
+                }
+                
+                const modeEl = document.getElementById(`mode_${s.key}`);
+                if (modeEl) {
+                    modeEl.value = config[`${s.key}.exec_mode`] || 'manual';
+                }
+                
+                s.params.forEach(p => {
+                    const fullKey = `${s.key}.${p.key}`;
+                    const el = document.getElementById(`param_${fullKey}`);
+                    if (el && document.activeElement !== el) {
+                        const rawVal = parseFloat(config[fullKey]);
+                        if (!isNaN(rawVal)) {
+                            const displayVal = p.multiplier ? rawVal * p.multiplier : rawVal;
+                            el.value = Number(displayVal.toFixed(2));
+                        } else {
+                            el.value = "";
+                        }
+                    }
+                });
+            });
+            
+            // Re-run filter to ensure table reflects newly disabled/enabled strategies
+            filterOpportunities();
+        }
+
+        async function toggleStrategyState(key, el) {
+            const val = el.checked ? 'true' : 'false';
+            logEvent(`[SYSTEM] Strategy ${key} ${el.checked ? 'ENABLED' : 'DISABLED'}`);
+            await fetch('/api/poly-yield/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: `${key}.enabled`, value: val })
+            });
+        }
+
+        async function saveStrategyMode(key, el) {
+            const val = el.value;
+            logEvent(`[SYSTEM] Strategy ${key} mode set to ${val.toUpperCase()}`);
+            await fetch('/api/poly-yield/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: `${key}.exec_mode`, value: val })
+            });
+        }
+
+        async function saveStrategyParam(fullKey, el, multiplier) {
+            const val = parseFloat(el.value);
+            if (isNaN(val)) return;
+            const dbVal = multiplier !== 1 ? val / multiplier : val;
+            logEvent(`[SYSTEM] Strategy param ${fullKey} set to ${dbVal}`);
+            await fetch('/api/poly-yield/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: fullKey, value: dbVal.toString() })
+            });
+        }
+
+        // Init
+        connectWS();
+        fetchWalletBalance();
+        fetchOpportunities();
+        fetchPositions();
+        fetchStats();
+
+        // Refresh data periodically
+        setInterval(fetchWalletBalance, 10000);
+        setInterval(fetchOpportunities, 30000);
+        setInterval(() => { fetchPositions(); fetchStats(); }, 60000);
+
+        // Refresh orderbook only when visible
+        setInterval(() => {
+            const panel = document.getElementById('orderbookPanel');
+            if (selectedTokenId && panel && panel.style.display !== 'none') {
+                loadOrderBook(selectedTokenId, selectedMarketTitle);
+            }
+        }, 5000);
+    </script>
+</body>
+</html>
