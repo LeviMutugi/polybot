@@ -94,6 +94,8 @@ def init_db():
                 notes TEXT,
                 instructions TEXT, -- JSON array of manual steps
                 legs TEXT,         -- JSON array of legs (for multi-outcome)
+                max_profit_usdc REAL, -- best-case payoff if held to resolution
+                max_loss_usdc REAL,   -- worst-case payoff if held to resolution
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -129,7 +131,11 @@ def init_db():
                 stop_loss_price REAL,
                 take_profit_price REAL,
                 trailing_stop_pct REAL,
-                highest_price REAL
+                highest_price REAL,
+                max_profit_usdc REAL,  -- best-case payoff at entry (actual fill, not predicted)
+                max_loss_usdc REAL,    -- worst-case payoff at entry (actual fill, not predicted)
+                executed_by TEXT DEFAULT 'bot', -- 'bot' (auto scan loop) or 'manual' (human-triggered API call)
+                exit_price REAL        -- price at manual/stop exit, or 1.0/0.0 on resolution settlement
             );
 
             -- Strategy performance stats
@@ -180,7 +186,13 @@ def init_db():
             ("poly_yield_positions", "highest_price", "REAL"),
             ("poly_yield_positions", "token_id", "TEXT"),
             ("poly_yield_positions", "idempotency_key", "TEXT"),
-            ("poly_yield_opportunities", "token_id", "TEXT")
+            ("poly_yield_opportunities", "token_id", "TEXT"),
+            ("poly_yield_opportunities", "max_profit_usdc", "REAL"),
+            ("poly_yield_opportunities", "max_loss_usdc", "REAL"),
+            ("poly_yield_positions", "max_profit_usdc", "REAL"),
+            ("poly_yield_positions", "max_loss_usdc", "REAL"),
+            ("poly_yield_positions", "executed_by", "TEXT"),
+            ("poly_yield_positions", "exit_price", "REAL"),
         ]
         for table_name, col_name, col_type in migration_cols:
             try:
@@ -295,5 +307,19 @@ def init_db():
                 "WHERE key IN ('s4_corr.exec_mode', 's8_late_stage.exec_mode') AND value = 'auto'"
             )
             conn.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES ('schema_version', '2')")
+
+        # One-time migration (v3): backfill executed_by for positions recorded before
+        # this column existed. Manual-trade-panel positions are identifiable by
+        # strategy key; everything else predates the distinction and defaults to 'bot'
+        # (the vast majority of pre-existing rows came from the auto-scan loop).
+        if current_version < 3:
+            conn.execute(
+                "UPDATE poly_yield_positions SET executed_by = 'manual' "
+                "WHERE executed_by IS NULL AND strategy IN ('manual', 'manual_trade')"
+            )
+            conn.execute(
+                "UPDATE poly_yield_positions SET executed_by = 'bot' WHERE executed_by IS NULL"
+            )
+            conn.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES ('schema_version', '3')")
 
         conn.commit()
