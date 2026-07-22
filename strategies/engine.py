@@ -216,9 +216,15 @@ class PolyYieldEngine:
 
         - Single-leg directional bets: max_profit = shares - cost (if it resolves the
           held way), max_loss = -cost (total loss if it resolves the other way).
-        - Multi-leg arbitrage baskets (S3/S5): by construction the bottleneck leg's
-          shares are guaranteed to pay out regardless of which outcome resolves, so
-          max_profit == max_loss == the guaranteed profit (a range doesn't apply).
+        - Multi-leg arbitrage baskets (payoff_type == 'guaranteed_arb', e.g. S3/S5's
+          sub-basket): by construction the bottleneck leg's shares are guaranteed to
+          pay out regardless of which outcome resolves, so max_profit == max_loss ==
+          the guaranteed profit (a range doesn't apply).
+        - Conditional multi-leg bets (payoff_type == 'conditional_multi_leg', e.g.
+          S20 Dutching): only a SUBSET of outcomes is covered, so there's genuine tail
+          risk — the strategy already computed its own asymmetric max_profit/max_loss
+          (net profit if a covered outcome wins vs. total stake lost if it doesn't),
+          which must NOT be overwritten with the guaranteed-arb shortcut above.
         """
         if opp.get("strategy") in self._NON_RESOLUTION_STRATEGIES:
             return
@@ -230,6 +236,8 @@ class PolyYieldEngine:
             return
 
         if opp.get("legs"):
+            if opp.get("payoff_type") != "guaranteed_arb":
+                return  # leave the strategy's own (asymmetric) payoff figures untouched
             profit_pct = opp.get("profit_pct")
             if profit_pct is None:
                 return
@@ -287,8 +295,8 @@ class PolyYieldEngine:
                      slippage_bps, market_id, market_title, market_url, token_id, outcome, entry_price,
                      implied_prob, yes_price, no_price, annualized_apy, profit_pct, days_to_expiry,
                      action, exec_mode, suggested_usdc, status, notes, instructions, legs,
-                     max_profit_usdc, max_loss_usdc, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                     max_profit_usdc, max_loss_usdc, payoff_type, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
                 """, [
                     opp.get("id"), opp.get("strategy"), opp.get("risk_level"), opp.get("exec_mode"),
                     opp.get("market_type", "Binary"), opp.get("reward_score", 0.0), opp.get("slippage_bps", 0.0),
@@ -299,7 +307,7 @@ class PolyYieldEngine:
                     opp.get("action"), opp.get("exec_mode"), opp.get("suggested_usdc"),
                     opp.get("status", "open"), opp.get("notes"),
                     json.dumps(opp.get("instructions")), json.dumps(opp.get("legs")),
-                    opp.get("max_profit_usdc"), opp.get("max_loss_usdc")
+                    opp.get("max_profit_usdc"), opp.get("max_loss_usdc"), opp.get("payoff_type", "directional")
                 ])
                 conn.commit()
             await self._broadcast({"type": "opportunity_update", "data": opp})
@@ -487,7 +495,7 @@ class PolyYieldEngine:
                 self._paper_refund(pos_id, allocated_usdc, "basket position record failed")
                 return {"success": False, "error": f"Failed to record position (funds refunded): {e}"}
             await alert.send(f"Paper basket trade executed: {opp['market_title']} for ${allocated_usdc:.2f} USDC", level="success")
-            return {"success": True, "mode": "paper", "position_id": pos_id}
+            return {"success": True, "mode": "paper", "position_id": pos_id, "cost_usdc": allocated_usdc}
 
         if not self._clob_client:
             return {"success": False, "error": "CLOB client not configured for live trading"}
@@ -521,9 +529,9 @@ class PolyYieldEngine:
         total_cost = sum(p.get("fill_cost", 0) for p in placed)
         min_shares = min(p.get("fill_shares", 0) for p in placed) if placed else 0
         order_ids_str = ",".join(str(p.get("order_id", "")) for p in placed)
-        await self._record_position(opp, min_shares, total_cost or allocated_usdc, order_ids_str, fill_price=opp.get("entry_price"), triggered_by=triggered_by)
+        new_pos_id = await self._record_position(opp, min_shares, total_cost or allocated_usdc, order_ids_str, fill_price=opp.get("entry_price"), triggered_by=triggered_by)
         await alert.send(f"Live Basket trade success: {opp['market_title']} for ${total_cost or allocated_usdc:.2f} USDC", level="success")
-        return {"success": True, "placed": len(placed)}
+        return {"success": True, "placed": len(placed), "position_id": new_pos_id, "cost_usdc": total_cost or allocated_usdc}
 
     async def _execute_single_leg(self, opp: dict, allocated_usdc: float, mode: str, max_slippage: float, is_manual_trade: bool, triggered_by: str = "bot") -> dict:
         """Single-leg execution with live price re-verification against the order book."""
@@ -565,7 +573,7 @@ class PolyYieldEngine:
                 self._paper_refund(pos_id, allocated_usdc, "position record failed")
                 return {"success": False, "error": f"Failed to record position (funds refunded): {e}"}
             await alert.send(f"Paper trade executed: {opp['market_title']} -> {opp['outcome']} for ${allocated_usdc:.2f} USDC at ${exec_price:.4f}", level="success")
-            return {"success": True, "mode": "paper", "position_id": pos_id}
+            return {"success": True, "mode": "paper", "position_id": pos_id, "cost_usdc": allocated_usdc}
 
         if not self._clob_client:
             return {"success": False, "error": "CLOB client not configured for live trading"}
@@ -592,9 +600,9 @@ class PolyYieldEngine:
                 allocated_usdc = fill_res["fill_cost"]
                 price = fill_res["fill_price"]
 
-                await self._record_position(opp, shares, allocated_usdc, order_id, fill_price=price, triggered_by=triggered_by)
+                new_pos_id = await self._record_position(opp, shares, allocated_usdc, order_id, fill_price=price, triggered_by=triggered_by)
                 await alert.send(f"Manual trade executed: {opp['market_title']} -> {opp['outcome']} for ${allocated_usdc:.2f} USDC", level="success")
-                return {"success": True, "order_id": order_id}
+                return {"success": True, "order_id": order_id, "position_id": new_pos_id, "cost_usdc": allocated_usdc}
             except Exception as e:
                 return {"success": False, "error": str(e)}
 
@@ -611,9 +619,9 @@ class PolyYieldEngine:
                 shares = fill_res["fill_shares"]
                 cost_usdc = fill_res["fill_cost"]
                 fill_price = fill_res["fill_price"]
-                await self._record_position(opp, shares, cost_usdc, order_id, fill_price=fill_price, triggered_by=triggered_by)
+                new_pos_id = await self._record_position(opp, shares, cost_usdc, order_id, fill_price=fill_price, triggered_by=triggered_by)
                 await alert.send(f"Live trade executed & filled: {opp['market_title']} -> {opp['outcome']} for ${cost_usdc:.2f} USDC at ${fill_price:.4f}", level="success")
-                return {"success": True, "order_id": order_id}
+                return {"success": True, "order_id": order_id, "position_id": new_pos_id, "cost_usdc": cost_usdc}
             else:
                 return {"success": False, "error": f"Order was not filled: {fill_res.get('error')}"}
         else:
@@ -717,16 +725,21 @@ class PolyYieldEngine:
         # Best-/worst-case payoff computed from the ACTUAL fill (shares, cost) rather
         # than the opportunity's pre-execution estimate, since slippage during fill can
         # change both. Every Polymarket share resolves to exactly $1 or $0.
+        payoff_type = opp.get("payoff_type", "directional")
         if opp.get("strategy") in self._NON_RESOLUTION_STRATEGIES:
             max_profit_usdc = None
             max_loss_usdc = None
-        elif opp.get("legs"):
+        elif opp.get("legs") and payoff_type == "guaranteed_arb":
             # Arbitrage basket: the bottleneck leg's shares are guaranteed to pay out
             # regardless of which outcome resolves — no profit/loss range, one number.
             guaranteed_pnl = round(shares * 1.0 - cost_usdc, 4)
             max_profit_usdc = guaranteed_pnl
             max_loss_usdc = guaranteed_pnl
         else:
+            # Directional bets, and conditional multi-leg bets (payoff_type ==
+            # 'conditional_multi_leg', e.g. Dutching): a real subset-of-outcomes bet
+            # has genuine tail risk, so this is the same asymmetric win/lose formula
+            # as a plain directional position — win pays shares*$1, loss forfeits cost.
             max_profit_usdc = round(shares * 1.0 - cost_usdc, 4)
             max_loss_usdc = round(-cost_usdc, 4)
         
@@ -767,8 +780,8 @@ class PolyYieldEngine:
                      actual_fill_price, actual_gas_usdc, risk_level, fill_slippage_bps,
                      quality_at_entry, predicted_pnl_usdc, mode,
                      stop_loss_price, take_profit_price, trailing_stop_pct, highest_price,
-                     max_profit_usdc, max_loss_usdc, executed_by)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     max_profit_usdc, max_loss_usdc, executed_by, legs, payoff_type)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, [
                     pos_id, opp.get("id"), opp.get("strategy"), opp.get("market_id"),
                     opp.get("market_title"), opp.get("token_id"), opp.get("outcome"),
@@ -777,7 +790,8 @@ class PolyYieldEngine:
                     entry_price, 0.005, opp.get("risk_level"), opp.get("slippage_bps"),
                     opp.get("reward_score"), (cost_usdc * opp.get("profit_pct", 0.0) / 100.0 if opp.get("profit_pct") else 0.0),
                     mode, sl_price, tp_price, ts_pct, entry_price,
-                    max_profit_usdc, max_loss_usdc, triggered_by
+                    max_profit_usdc, max_loss_usdc, triggered_by,
+                    json.dumps(opp.get("legs")) if opp.get("legs") else None, payoff_type
                 ])
                 # Update opportunity status to closed/executed
                 conn.execute("UPDATE poly_yield_opportunities SET status = 'executed' WHERE id = ?", [opp.get("id")])
@@ -791,6 +805,7 @@ class PolyYieldEngine:
                 """, [opp["strategy"], mode])
                 conn.commit()
             await self._broadcast({"type": "position_opened", "pos_id": pos_id, "market": opp["market_title"]})
+            return pos_id
         except Exception as e:
             _log.error("CRITICAL: Failed to record position: %s", e)
             if mode == "live":

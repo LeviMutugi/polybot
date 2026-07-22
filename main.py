@@ -487,11 +487,8 @@ class DutchingEvaluateArgs(BaseModel):
     providers: list = ["openai", "anthropic", "kimi", "deepseek"]
 
 class DutchingExecuteArgs(BaseModel):
-    instance_id: str
-    market_id: str
-    market_title: str
-    legs: list
-    stake_usdc: float
+    opportunity_id: str
+    instance_id: str = "inst_manual_1"
     p_model_top_set: float = 0.90
     p_tail_risk: float = 0.10
     confidence: float = 0.80
@@ -594,77 +591,61 @@ async def save_dutching_key(args: KeySubmit, _=Depends(verify_token)):
 
 @app.post("/api/dutching/execute")
 async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_token)):
-    """Execute multi-leg Dutching order using paper balance or live CLOB."""
-    if args.stake_usdc <= 0:
-        raise HTTPException(status_code=400, detail="Stake USDC must be > 0")
-    
-    mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
-    from services.wallet import wallet_service
-    
-    if mode == "live":
-        from services.keystore import keystore
-        pk = keystore.get_decrypted("polymarket_wallet")
-        if not pk:
-            raise HTTPException(status_code=400, detail="Polymarket wallet key not configured for live trading")
-        
-        from py_clob_client.client import ClobClient
-        from py_clob_client.clob_types import OrderArgs
-        chain_id = await cfg.get_typed("polygon_chain_id", int, 137)
-        clob_url = settings.polymarket_clob_url.rstrip("/")
-        if chain_id == 80002:
-            clob_url = "https://clob-testnet.polymarket.com"
-        
-        clob_client = ClobClient(host=clob_url, key=pk, chain_id=chain_id)
-        
-        # Execute legs sequentially
-        for leg in args.legs:
-            price = float(leg.get("fill_price", leg.get("price", 0)))
-            size = float(leg.get("shares", 0))
-            token_id = leg.get("token_id")
-            if token_id and price > 0 and size > 0:
-                try:
-                    order = clob_client.create_order(OrderArgs(
-                        price=price, size=size, side="BUY", token_id=token_id
-                    ))
-                    resp = clob_client.post_order(order)
-                    leg["order_id"] = resp.get("orderID")
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Failed to place CLOB order for dutching leg {token_id}: {e}")
-                    leg["error"] = str(e)
-    
-    # Deduct stake from the paper wallet. Live mode has no tracked "wallet" balance —
-    # cost is whatever the CLOB fills above actually charged on-chain — so only paper
-    # mode debits here, matching the convention used by the main engine's executor.
-    trade_id = f"dutch_tx_{uuid.uuid4().hex[:8]}"
-    if mode == "paper":
-        from services.wallet import InsufficientFundsError
-        try:
-            wallet_service.debit(
-                "paper", args.stake_usdc, "dutching_trade_stake",
-                position_id=trade_id,
-                description=f"Dutching stake on {args.market_title[:30]}",
-                idempotency_key=f"open_{trade_id}"
-            )
-        except InsufficientFundsError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+    """Execute a scanned Dutching opportunity through the standard hardened engine
+    pipeline — the same execute_opportunity() path every other strategy uses. This
+    gets Dutching, for free: Kelly/fixed-size allocation, the drawdown limit, the
+    daily-loss and consecutive-loss circuit breakers, the per-market lock, the
+    opportunity freshness/idempotency guards, live pre-flight order-book
+    verification with slippage/drift guards, and partial-fill rollback + killswitch.
+    (It also means Dutching respects its own exec_mode gate like every other
+    strategy — blocked while s20_dutching.exec_mode is 'manual', the default;
+    switch it to semi/auto in the Strategy Control Panel to unlock this.)
 
-    sum_market_price = sum(float(l.get("market_price", l.get("price", 0))) for l in args.legs)
-    sum_fill_price = sum(float(l.get("fill_price", l.get("price", 0))) for l in args.legs)
-    
+    dutching_trades only carries LLM-arena metadata now (p_model_top_set,
+    p_tail_risk, confidence, per-model leaderboard attribution) — the resulting
+    poly_yield_positions row, linked via position_id, is the source of truth for
+    the trade's cost, PnL, and settlement.
+    """
     conn = get_sqlite()
+    with _sqlite_lock:
+        row = conn.execute(
+            "SELECT * FROM poly_yield_opportunities WHERE id = ?", [args.opportunity_id]
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    opp = dict(row)
+    if opp.get("strategy") != "s20_dutching":
+        raise HTTPException(status_code=400, detail="Opportunity is not a Dutching opportunity")
+    if opp.get("legs"):
+        opp["legs"] = json.loads(opp["legs"])
+    if opp.get("instructions"):
+        opp["instructions"] = json.loads(opp["instructions"])
+
+    result = await poly_yield_engine.execute_opportunity(opp, triggered_by="manual")
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Execution failed"))
+
+    position_id = result.get("position_id")
+    stake_usdc = float(result.get("cost_usdc") or opp.get("suggested_usdc") or 0.0)
+    legs = opp.get("legs") or []
+    mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
+    trade_id = f"dutch_tx_{uuid.uuid4().hex[:8]}"
+    sum_market_price = sum(float(l.get("market_price", l.get("price", 0))) for l in legs)
+    sum_fill_price = sum(float(l.get("fill_price", l.get("price", 0))) for l in legs)
+
     with _sqlite_lock:
         conn.execute(
             """INSERT INTO dutching_trades
                (id, instance_id, market_id, market_title, top_candidates_json, sum_market_price,
-                sum_fill_price, p_model_top_set, p_tail_risk, confidence, stake_usdc, legs_json, mode)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                sum_fill_price, p_model_top_set, p_tail_risk, confidence, stake_usdc, legs_json, mode, position_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                trade_id, args.instance_id, args.market_id, args.market_title,
-                json.dumps([l.get("outcome") for l in args.legs]),
+                trade_id, args.instance_id, opp.get("market_id"), opp.get("market_title"),
+                json.dumps([l.get("outcome") for l in legs]),
                 sum_market_price, sum_fill_price, args.p_model_top_set,
-                args.p_tail_risk, args.confidence, args.stake_usdc,
-                json.dumps(args.legs), mode
+                args.p_tail_risk, args.confidence, stake_usdc,
+                json.dumps(legs), mode, position_id
             ]
         )
         # Ensure the arena instance row exists (e.g. the "Quick Trade" button targets
@@ -674,10 +655,9 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
             "INSERT OR IGNORE INTO dutching_arena_instances (id, provider, model_name) VALUES (?, ?, ?)",
             [args.instance_id, args.instance_id, "manual"]
         )
-        # Update arena instance used budget
         conn.execute(
             "UPDATE dutching_arena_instances SET used_budget_usdc = used_budget_usdc + ?, active_positions = active_positions + 1 WHERE id = ?",
-            [args.stake_usdc, args.instance_id]
+            [stake_usdc, args.instance_id]
         )
         conn.commit()
 
@@ -685,8 +665,9 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
     return {
         "status": "executed",
         "trade_id": trade_id,
+        "position_id": position_id,
         "mode": mode,
-        "stake_usdc": args.stake_usdc,
+        "stake_usdc": stake_usdc,
         "new_balance": new_balance
     }
 

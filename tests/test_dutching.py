@@ -4,6 +4,7 @@ Unit Tests for Dutching Bot Strategy & Multi-LLM Provider Engine
 import pytest
 import asyncio
 import httpx
+from db.config import cfg
 from strategies.s20_dutching import DutchingStrategy
 from services.llm_provider import LLMProviderService
 
@@ -41,13 +42,13 @@ async def test_dutching_strategy_scan(monkeypatch):
         "slug": "presidential-election-2028",
         "endDate": "2028-11-05T00:00:00Z",
         "markets": [
-            {"groupItemTitle": "Candidate A", "outcomes": '["Yes", "No"]',
+            {"id": "mkt_a", "groupItemTitle": "Candidate A", "outcomes": '["Yes", "No"]',
              "outcomePrices": '["0.45", "0.55"]', "clobTokenIds": '["tok_a", "tok_a_no"]'},
-            {"groupItemTitle": "Candidate B", "outcomes": '["Yes", "No"]',
+            {"id": "mkt_b", "groupItemTitle": "Candidate B", "outcomes": '["Yes", "No"]',
              "outcomePrices": '["0.30", "0.70"]', "clobTokenIds": '["tok_b", "tok_b_no"]'},
-            {"groupItemTitle": "Candidate C", "outcomes": '["Yes", "No"]',
+            {"id": "mkt_c", "groupItemTitle": "Candidate C", "outcomes": '["Yes", "No"]',
              "outcomePrices": '["0.10", "0.90"]', "clobTokenIds": '["tok_c", "tok_c_no"]'},
-            {"groupItemTitle": "Candidate D", "outcomes": '["Yes", "No"]',
+            {"id": "mkt_d", "groupItemTitle": "Candidate D", "outcomes": '["Yes", "No"]',
              "outcomePrices": '["0.05", "0.95"]', "clobTokenIds": '["tok_d", "tok_d_no"]'},
         ]
     }
@@ -81,6 +82,11 @@ async def test_dutching_strategy_scan(monkeypatch):
         assert opp["p_sum"] == 0.85
         assert len(opp["legs"]) == 3
         assert opp["profit_pct"] > 0
+        assert opp["payoff_type"] == "conditional_multi_leg"
+        # Each leg must carry its OWN sub-market id — settlement/redemption need this
+        # since each candidate's market is an independent binary Yes/No condition.
+        for leg in opp["legs"]:
+            assert leg["market_id"] in ("mkt_a", "mkt_b", "mkt_c", "mkt_d")
 
 @pytest.mark.asyncio
 async def test_llm_provider_fallback_response():
@@ -114,3 +120,80 @@ def test_llm_json_response_parsing():
     assert parsed["p_tail_risk"] == 0.06
     assert parsed["confidence"] == 0.88
     assert parsed["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_dutching_execute_respects_exec_mode_and_debits_paper_wallet(monkeypatch):
+    """Quick Trade must route through the same hardened engine.execute_opportunity()
+    path as every other strategy: blocked while s20_dutching.exec_mode is 'manual'
+    (the default), and once switched to semi/auto it debits the paper wallet,
+    records a real position with legs/payoff_type, and links a dutching_trades
+    metadata row to that position for the arena leaderboard."""
+    import strategies.base as base_mod
+    from fastapi import HTTPException
+    from strategies.engine import poly_yield_engine
+    from db.database import get_sqlite, _sqlite_lock
+    import main
+
+    async def mock_calc_price(token_id, amount_usdc, side="buy", http_client=None):
+        prices = {"tok_trump": 0.45, "tok_harris": 0.40}
+        return {"price": prices.get(token_id, 0.5), "slippage": 0.0}
+
+    monkeypatch.setattr(base_mod, "calculate_execution_price", mock_calc_price)
+
+    opp = {
+        "id": "opp_dutch_test1",
+        "strategy": "s20_dutching",
+        "market_id": "evt_test",
+        "market_title": "Test Dutching Market",
+        "market_type": "Multi-outcome",
+        "outcome": "Top-2 Dutch: Trump, Harris",
+        "entry_price": 0.85,
+        "suggested_usdc": 20.0,
+        "profit_pct": 8.0,
+        "exec_mode": "manual",
+        "payoff_type": "conditional_multi_leg",
+        "legs": [
+            {"outcome": "Trump", "market_id": "mkt_trump", "token_id": "tok_trump",
+             "price": 0.45, "fill_price": 0.45, "shares": 22.0, "stake_usdc": 10.0},
+            {"outcome": "Harris", "market_id": "mkt_harris", "token_id": "tok_harris",
+             "price": 0.40, "fill_price": 0.40, "shares": 22.0, "stake_usdc": 10.0},
+        ],
+        "status": "open",
+    }
+    await poly_yield_engine._upsert_opportunity(opp)
+
+    args = main.DutchingExecuteArgs(opportunity_id="opp_dutch_test1")
+
+    # Default exec_mode is 'manual' — Quick Trade must be blocked exactly like clicking
+    # "Execute" on any other strategy's opportunity card.
+    with pytest.raises(HTTPException) as exc_info:
+        await main.execute_dutching_trade(args)
+    assert "MANUAL mode" in str(exc_info.value.detail)
+
+    # Switch to semi — Quick Trade should now succeed through the full engine pipeline
+    cfg.set("s20_dutching.exec_mode", "semi")
+    balance_before = float(cfg.get("portfolio.paper_balance"))
+
+    result = await main.execute_dutching_trade(args)
+    assert result["status"] == "executed"
+    assert result["position_id"]
+    assert result["stake_usdc"] > 0
+    assert result["new_balance"] == pytest.approx(balance_before - result["stake_usdc"])
+
+    conn = get_sqlite()
+    with _sqlite_lock:
+        pos = conn.execute(
+            "SELECT * FROM poly_yield_positions WHERE id = ?", [result["position_id"]]
+        ).fetchone()
+        trade = conn.execute(
+            "SELECT * FROM dutching_trades WHERE position_id = ?", [result["position_id"]]
+        ).fetchone()
+
+    assert pos is not None
+    assert pos["strategy"] == "s20_dutching"
+    assert pos["payoff_type"] == "conditional_multi_leg"
+    assert pos["legs"] is not None
+    assert pos["mode"] == "paper"
+    assert trade is not None
+    assert trade["instance_id"] == "inst_manual_1"

@@ -21,7 +21,8 @@ class DutchingStrategy(BaseStrategy):
             name="Top-N Dutching",
             risk_level="Medium",
             market_type="Multi-outcome",
-            default_exec_mode="manual"
+            default_exec_mode="manual",
+            payoff_type="conditional_multi_leg"
         )
 
     async def scan(self, markets: List[dict], balance: float, http_client: httpx.AsyncClient) -> List[dict]:
@@ -33,6 +34,7 @@ class DutchingStrategy(BaseStrategy):
         max_set_price = await cfg.get_typed("s20_dutching.max_set_price", float, 0.92)
         min_roi_pct = await cfg.get_typed("s20_dutching.min_roi_pct", float, 3.0)
         max_pos_pct = await cfg.get_typed("s20_dutching.max_position_pct", float, 0.08)
+        exec_mode = await cfg.get_typed("s20_dutching.exec_mode", str, self.default_exec_mode)
 
         opps = []
         
@@ -56,17 +58,19 @@ class DutchingStrategy(BaseStrategy):
                 outcomes = []
                 prices = []
                 token_ids = []
+                sub_market_ids = []
 
                 for sm in sub_markets:
                     sm_out = parse_list(sm.get("outcomes"))
                     sm_prices = parse_list(sm.get("outcomePrices"))
                     sm_tokens = parse_list(sm.get("clobTokenIds"))
-                    
+
                     if sm_out and len(sm_out) >= 2 and sm_out[0] == "Yes" and sm_prices and sm_tokens:
                         name = sm.get("groupItemTitle") or sm.get("question")
                         outcomes.append(name)
                         prices.append(sm_prices[0])
                         token_ids.append(sm_tokens[0])
+                        sub_market_ids.append(sm.get("id"))
 
                 if len(outcomes) < 3:
                     continue
@@ -81,7 +85,8 @@ class DutchingStrategy(BaseStrategy):
                                 "index": i,
                                 "name": outcomes[i],
                                 "price": round(p, 4),
-                                "token_id": token_ids[i]
+                                "token_id": token_ids[i],
+                                "market_id": sub_market_ids[i]
                             })
                     except (ValueError, TypeError):
                         continue
@@ -142,7 +147,8 @@ class DutchingStrategy(BaseStrategy):
                         "fill_price": fill_price,
                         "shares": leg_shares,
                         "token_id": leg["token_id"],
-                        "stake_usdc": round(leg_target_usdc, 2)
+                        "stake_usdc": round(leg_target_usdc, 2),
+                        "market_id": leg["market_id"]
                     })
 
                 if not leg_details:
@@ -167,11 +173,16 @@ class DutchingStrategy(BaseStrategy):
                     "url": get_market_url(event),
                     "outcomes": outcomes,
                     "top_candidates": [c["name"] for c in top_set],
+                    # poly_yield_positions.outcome is NOT NULL — this is a human-readable
+                    # summary of the covered set, not something settlement matches against
+                    # (each leg's own market_id/outcome field does that work instead).
+                    "outcome": f"Top-{len(top_set)} Dutch: {', '.join(c['name'] for c in top_set)}"[:120],
                     "entry_price": p_sum,
-                    "exec_mode": self.default_exec_mode,
+                    "exec_mode": exec_mode,
                     "p_sum": round(p_sum, 4),
                     "suggested_usdc": round(actual_total_cost, 2),
                     "profit_pct": round(actual_roi_pct, 2),
+                    "payoff_type": self.payoff_type,
                     "max_profit_usdc": round(net_profit_if_hit, 2),
                     "max_loss_usdc": round(-actual_total_cost, 2),
                     "legs": leg_details,

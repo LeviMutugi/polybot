@@ -19,12 +19,19 @@ NOVELTY_TAGS = {
 }
 
 class BaseStrategy:
-    def __init__(self, key: str, name: str, risk_level: str, market_type: str, default_exec_mode: str = "manual"):
+    def __init__(self, key: str, name: str, risk_level: str, market_type: str, default_exec_mode: str = "manual",
+                 payoff_type: str = "directional"):
         self.key = key
         self.name = name
         self.risk_level = risk_level  # 'Low', 'Medium', 'High'
         self.market_type = market_type  # 'Binary', 'Multi-outcome', 'Event-based'
         self.default_exec_mode = default_exec_mode  # 'manual', 'semi', 'auto'
+        # How settlement should determine win/loss for this strategy's positions:
+        #   'directional'         - single-outcome bet; match pos.outcome against the resolved winner (default)
+        #   'guaranteed_arb'      - multi-leg basket covering all outcomes; always wins by construction (S3, S5 sub-basket)
+        #   'conditional_multi_leg' - multi-leg bet on a subset of outcomes; wins only if the resolved
+        #                             winner matches one of the position's legs (S20 Dutching)
+        self.payoff_type = payoff_type
 
     async def scan(self, markets: List[dict], balance: float, http_client: httpx.AsyncClient) -> List[dict]:
         raise NotImplementedError("Strategy must implement scan()")

@@ -63,10 +63,6 @@ class PolyYieldSettlement:
                     settled = await self._settle_open_positions()
                     if settled > 0:
                         print(f"[PolyYieldSettlement] Successfully resolved {settled} positions.")
-                        
-                    dutch_settled = await self._settle_dutching_trades()
-                    if dutch_settled > 0:
-                        print(f"[PolyYieldSettlement] Successfully resolved {dutch_settled} Dutching trades.")
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
@@ -175,19 +171,28 @@ class PolyYieldSettlement:
         conn = get_sqlite()
         with _sqlite_lock:
             rows = conn.execute("SELECT * FROM poly_yield_positions WHERE status = 'open'").fetchall()
-        
+
         settled_count = 0
         for row in rows:
             pos = dict(row)
             market_id = pos.get("market_id")
-            if not market_id:
-                continue
+            has_legs = bool(pos.get("legs"))
 
-            market = await self._fetch_market(str(market_id))
-            if not market or not market.get("closed"):
-                continue
+            # Multi-leg positions (guaranteed_arb / conditional_multi_leg) resolve
+            # per-LEG inside _compute_pnl — each leg can live on its own market with
+            # its own conditionId (Dutching, S5's sub-basket), so the position's own
+            # top-level market_id isn't reliably fetchable (for Dutching it's a Gamma
+            # EVENT id, not a market id) and must not gate settlement here.
+            if has_legs:
+                market = None
+            else:
+                if not market_id:
+                    continue
+                market = await self._fetch_market(str(market_id))
+                if not market or not market.get("closed"):
+                    continue
 
-            realized_pnl, settlement_outcome, status = self._compute_pnl(pos, market)
+            realized_pnl, settlement_outcome, status = await self._compute_pnl(pos, market)
             if status == "open":
                 continue  # Resolution is not finalized on Gamma yet
 
@@ -229,6 +234,28 @@ class PolyYieldSettlement:
 
                 # Update cumulative statistics
                 self._update_stats(conn, pos.get("strategy"), realized_pnl, status, pos.get("mode", "paper"), float(pos.get("cost_usdc") or 0))
+
+                # If this was a Dutching position, propagate the result to the linked
+                # arena-instance leaderboard row. dutching_trades is metadata-only now
+                # (LLM eval scores) — poly_yield_positions is the source of truth for
+                # win/loss/pnl, this just mirrors the outcome onto the arena stats.
+                if pos.get("strategy") == "s20_dutching":
+                    trade_row = conn.execute(
+                        "SELECT instance_id FROM dutching_trades WHERE position_id = ?", [pos["id"]]
+                    ).fetchone()
+                    if trade_row:
+                        conn.execute(
+                            "UPDATE dutching_trades SET status = ?, settled_at = datetime('now'), pnl_usdc = ? WHERE position_id = ?",
+                            [status, realized_pnl, pos["id"]]
+                        )
+                        win_inc = 1 if status == "won" else 0
+                        loss_inc = 1 if status == "lost" else 0
+                        conn.execute(
+                            "UPDATE dutching_arena_instances SET win_count = win_count + ?, loss_count = loss_count + ?, "
+                            "total_pnl = total_pnl + ?, active_positions = MAX(0, active_positions - 1) WHERE id = ?",
+                            [win_inc, loss_inc, realized_pnl, trade_row["instance_id"]]
+                        )
+
                 conn.commit()
 
             settled_count += 1
@@ -247,71 +274,69 @@ class PolyYieldSettlement:
 
         return settled_count
 
-    async def _settle_dutching_trades(self) -> int:
-        conn = get_sqlite()
-        with _sqlite_lock:
-            rows = conn.execute("SELECT * FROM dutching_trades WHERE status = 'open'").fetchall()
-        
-        settled_count = 0
-        for row in rows:
-            trade = dict(row)
-            market_id = trade.get("market_id")
-            if not market_id:
+    def _leg_won(self, leg: dict, leg_market: Optional[dict]) -> Optional[bool]:
+        """True if this specific leg has definitively resolved in its favor, False if
+        resolved against it, None if its own market hasn't resolved yet.
+
+        Handles both leg shapes used across the multi-leg strategies:
+        - S3 Buy-All: every leg shares ONE N-ary market; leg['outcome'] is the actual
+          candidate name, which will literally equal the market's resolved winner.
+        - S5 sub-basket / S20 Dutching: each leg is its OWN binary Yes/No market;
+          leg['outcome'] is a label (a sub-event tag, or a candidate name) that never
+          appears among that market's own outcomes — what matters is whether ITS
+          market resolved to "Yes".
+        Checking both conditions handles either shape without needing to know which
+        one applies.
+        """
+        winner = self._winning_outcome(leg_market) if leg_market else None
+        if winner is None:
+            return None
+        winner_l = winner.strip().lower()
+        leg_outcome_l = (leg.get("outcome") or "").strip().lower()
+        return winner_l == leg_outcome_l or winner_l == "yes"
+
+    async def _resolve_multi_leg(self, pos: dict) -> Tuple[bool, str, str]:
+        """Determine win/loss for a multi-leg position (guaranteed_arb or
+        conditional_multi_leg) by checking each leg's own underlying market
+        independently, since legs can live on entirely separate markets/conditions.
+
+        Wins immediately as soon as any leg is confirmed a winner. Only settles a
+        loss once EVERY leg has individually, definitively resolved and none of them
+        won — this never declares victory or defeat based on partial information.
+        """
+        try:
+            legs = json.loads(pos.get("legs") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            legs = []
+        if not legs:
+            return False, "unknown", "open"
+
+        market_cache: dict = {}
+        all_resolved = True
+        for leg in legs:
+            leg_market_id = str(leg.get("market_id") or pos.get("market_id") or "")
+            if not leg_market_id:
+                all_resolved = False
                 continue
-
-            market = await self._fetch_market(str(market_id))
-            if not market or not market.get("closed"):
+            if leg_market_id not in market_cache:
+                market_cache[leg_market_id] = await self._fetch_market(leg_market_id)
+            leg_won = self._leg_won(leg, market_cache[leg_market_id])
+            if leg_won is None:
+                all_resolved = False
                 continue
+            if leg_won:
+                return True, "resolved_covered_outcome_won", "won"
 
-            winner = self._winning_outcome(market)
-            if not winner:
-                continue
-                
-            legs = json.loads(trade.get("legs_json", "[]"))
-            
-            won = False
-            for leg in legs:
-                if leg.get("outcome", "").lower() == winner.lower():
-                    won = True
-                    break
-                    
-            status = "won" if won else "lost"
-            stake = float(trade.get("stake_usdc", 0.0))
-            
-            if won:
-                min_shares = min(float(l.get("shares", 0)) for l in legs) if legs else 0
-                payout = min_shares * 1.0
-                pnl = payout - stake
-            else:
-                payout = 0.0
-                pnl = -stake
+        if not all_resolved:
+            return False, "unknown", "open"
 
-            # Credit paper wallet
-            if trade.get("mode") == "paper":
-                from services.wallet import wallet_service
-                wallet_service.credit("paper", payout, "dutching_settlement",
-                                      position_id=trade["id"],
-                                      description=f"Dutch {'Won' if won else 'Lost'}: {trade.get('market_title', '')[:30]}",
-                                      idempotency_key=f"dutch_settle_{trade['id']}")
-
-            with _sqlite_lock:
-                conn.execute("""
-                    UPDATE dutching_trades
-                    SET status = ?, settled_at = datetime('now'), pnl_usdc = ?
-                    WHERE id = ?
-                """, [status, pnl, trade["id"]])
-                
-                # Update arena instances
-                if status == "won":
-                    conn.execute("UPDATE dutching_arena_instances SET win_count = win_count + 1, total_pnl = total_pnl + ?, active_positions = active_positions - 1 WHERE id = ?", [pnl, trade["instance_id"]])
-                else:
-                    conn.execute("UPDATE dutching_arena_instances SET loss_count = loss_count + 1, total_pnl = total_pnl + ?, active_positions = active_positions - 1 WHERE id = ?", [pnl, trade["instance_id"]])
-                    
-                conn.commit()
-
-            settled_count += 1
-            
-        return settled_count
+        if (pos.get("payoff_type") or "directional") == "guaranteed_arb":
+            _log.critical(
+                "[Settlement] Guaranteed-arb position %s: every leg resolved against it — "
+                "the arbitrage-completeness assumption was violated. Settling as a loss.",
+                pos.get("id")
+            )
+        return False, "resolved_no_covered_outcome", "lost"
 
     def _winning_outcome(self, market: dict) -> Optional[str]:
         """Determine the resolved winner. Requires a definitive (>= 0.99) settlement price —
@@ -350,29 +375,33 @@ class PolyYieldSettlement:
         # Multi-outcome: exact match only (no substring to prevent false positives)
         return winner == outcome
 
-    def _compute_pnl(self, pos: dict, market: dict) -> Tuple[float, str, str]:
-        winning = self._winning_outcome(market)
-        if not winning:
-            return 0.0, "unknown", "open"
-
+    async def _compute_pnl(self, pos: dict, market: Optional[dict]) -> Tuple[float, str, str]:
         shares = float(pos.get("shares") or 0)
         cost = float(pos.get("cost_usdc") or 0)
-        entry = float(pos.get("entry_price") or 0)
         gas = float(pos.get("actual_gas_usdc") or 0)
-        strategy = pos.get("strategy") or ""
+        payoff_type = pos.get("payoff_type") or "directional"
 
-        won = self._position_won(pos, winning)
+        if pos.get("legs") and payoff_type in ("guaranteed_arb", "conditional_multi_leg"):
+            won, settlement_outcome, status = await self._resolve_multi_leg(pos)
+            if status == "open":
+                return 0.0, "unknown", "open"
+        else:
+            winning = self._winning_outcome(market)
+            if not winning:
+                return 0.0, "unknown", "open"
+            won = self._position_won(pos, winning)
+            status = "won" if won else "lost"
+            settlement_outcome = f"resolved_{winning.lower().replace(' ', '_')}"
 
-        # All strategies including s6_longshot buy a token (S6 buys NO)
-        # So they all use traditional buy leg PnL calculation
+        # All directional strategies including s6_longshot buy a token (S6 buys NO),
+        # and multi-leg positions record the guaranteed/bottleneck share count as
+        # `shares` — so every payoff_type uses the same buy-leg PnL calculation.
         if won:
             payout = shares * 1.0
             realized = payout - cost - gas
         else:
             realized = -cost - gas
 
-        status = "won" if won else "lost"
-        settlement_outcome = f"resolved_{winning.lower().replace(' ', '_')}"
         return round(realized, 4), settlement_outcome, status
 
     def _compute_apy_delta(self, pos: dict, realized_pnl: float) -> Optional[float]:
@@ -409,17 +438,46 @@ class PolyYieldSettlement:
             WHERE strategy = ? AND mode = ?
         """, [realized_pnl, return_amount, win_inc, loss_inc, strategy, mode])
 
-    async def _redeem_live_position(self, pos: dict, market: dict):
-        """Redeem won conditional tokens via Polymarket CTF."""
+    async def _redeem_live_position(self, pos: dict, market: Optional[dict]):
+        """Redeem won conditional tokens via Polymarket CTF.
+
+        A plain directional position lives on one market/condition (`market` is
+        already fetched by the caller). A multi-leg position (guaranteed_arb /
+        conditional_multi_leg) can span several INDEPENDENT markets, each with its
+        own conditionId (Dutching, S5's sub-basket — S3's legs happen to share one
+        market, which this collapses to naturally via the dedup below). Each
+        distinct condition found among the legs is redeemed separately.
+        """
         from services.keystore import keystore
         pk = keystore.get_decrypted("polymarket_wallet")
         if not pk:
             _log.warning("[Settlement] No private key for redemption of %s", pos["id"])
             return
 
-        condition_id = market.get("conditionId")
-        if not condition_id:
-            _log.error("[Settlement] No conditionId found for market %s", market.get("id"))
+        # Map conditionId -> its own market dict (needed to compute that condition's
+        # own index sets — S3's shared N-ary condition needs N index sets, a
+        # Dutching/S5 leg's own binary Yes/No condition needs 2).
+        condition_markets: dict = {}
+        if pos.get("legs"):
+            try:
+                legs = json.loads(pos.get("legs") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                legs = []
+            market_cache: dict = {}
+            for leg in legs:
+                leg_market_id = str(leg.get("market_id") or pos.get("market_id") or "")
+                if not leg_market_id:
+                    continue
+                if leg_market_id not in market_cache:
+                    market_cache[leg_market_id] = await self._fetch_market(leg_market_id)
+                leg_market = market_cache[leg_market_id]
+                if leg_market and leg_market.get("conditionId"):
+                    condition_markets[leg_market["conditionId"]] = leg_market
+        elif market and market.get("conditionId"):
+            condition_markets[market["conditionId"]] = market
+
+        if not condition_markets:
+            _log.error("[Settlement] No conditionId(s) found for redemption of position %s", pos["id"])
             return
 
         import web3
@@ -430,23 +488,17 @@ class PolyYieldSettlement:
         # AsyncWeb3 is required with AsyncHTTPProvider — mixing sync Web3 with an async
         # provider makes every awaited eth call fail at runtime
         w3 = web3.AsyncWeb3(web3.AsyncHTTPProvider(settings.polygon_rpc_url))
-        
+
         # Get CTF Address from ClobClient if available
         ctf_address = "0x4D97DCd97eC945f40CF65F87097CAe16E4bb2830" # Polygon CTF Address
         if poly_yield_engine._clob_client:
             try:
                 ctf_address = poly_yield_engine._clob_client.get_conditional_address()
-            except:
+            except Exception:
                 pass
 
         collateral = settings.polygon_usdc_contract
         parent_collection_id = "0x" + "0" * 64
-        
-        # Determine index sets. Usually [1, 2] for YES/NO
-        outcomes = parse_list(market.get("outcomes"))
-        index_sets = []
-        for i in range(len(outcomes)):
-            index_sets.append(1 << i)
 
         # Simple ABI for redeemPositions
         abi = [{
@@ -460,30 +512,34 @@ class PolyYieldSettlement:
             ],
             "outputs": []
         }]
-        
+
         contract = w3.eth.contract(address=w3.to_checksum_address(ctf_address), abi=abi)
-        
-        # We wrap in try block in case of RPC error or insufficient gas
-        _log.info("[Settlement] Redeeming position %s via CTF contract", pos["id"])
-        
-        try:
-            nonce = await w3.eth.get_transaction_count(acct.address)
-            tx = await contract.functions.redeemPositions(
-                w3.to_checksum_address(collateral),
-                parent_collection_id,
-                condition_id,
-                index_sets
-            ).build_transaction({
-                'from': acct.address,
-                'nonce': nonce,
-                'gasPrice': await w3.eth.gas_price
-            })
-            
-            signed_tx = w3.eth.account.sign_transaction(tx, private_key=pk)
-            tx_hash = await w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-            _log.info("[Settlement] Redeemed position %s, Tx Hash: %s", pos["id"], tx_hash.hex())
-        except Exception as e:
-            _log.error("[Settlement] Smart contract redemption skipped or failed: %s", e)
+
+        for condition_id, cond_market in condition_markets.items():
+            # Determine index sets from THIS condition's own outcome count.
+            # Usually [1, 2] for a binary YES/NO market.
+            outcomes = parse_list(cond_market.get("outcomes"))
+            index_sets = [1 << i for i in range(len(outcomes))] if outcomes else [1, 2]
+
+            _log.info("[Settlement] Redeeming position %s via CTF contract (condition %s)", pos["id"], condition_id)
+            try:
+                nonce = await w3.eth.get_transaction_count(acct.address)
+                tx = await contract.functions.redeemPositions(
+                    w3.to_checksum_address(collateral),
+                    parent_collection_id,
+                    condition_id,
+                    index_sets
+                ).build_transaction({
+                    'from': acct.address,
+                    'nonce': nonce,
+                    'gasPrice': await w3.eth.gas_price
+                })
+
+                signed_tx = w3.eth.account.sign_transaction(tx, private_key=pk)
+                tx_hash = await w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+                _log.info("[Settlement] Redeemed position %s, condition %s, Tx Hash: %s", pos["id"], condition_id, tx_hash.hex())
+            except Exception as e:
+                _log.error("[Settlement] Smart contract redemption skipped or failed for condition %s: %s", condition_id, e)
 
 # Global singleton
 poly_yield_settlement = PolyYieldSettlement()

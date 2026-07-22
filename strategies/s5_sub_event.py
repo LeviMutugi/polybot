@@ -173,6 +173,10 @@ class SubEventArbitrageStrategy(BaseStrategy):
                     "action": action,
                     "exec_mode": exec_mode,
                     "suggested_usdc": round(suggested_usdc, 2),
+                    # buy_sub_basket buys the YES leg of every sub-event: if the parent/sub-event
+                    # relationship holds (parent YES iff at least one sub-event YES), this basket is
+                    # a guaranteed-arb, same payoff shape as S3. buy_parent_yes is a plain directional bet.
+                    "payoff_type": "guaranteed_arb" if action == "buy_sub_basket" else "directional",
                     "legs": sub_legs if action == "buy_sub_basket" else None,
                     "token_id": parent_token if action == "buy_parent_yes" else None,
                     "status": "open",

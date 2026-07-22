@@ -42,10 +42,25 @@ def test_annotate_payoff_single_leg():
 def test_annotate_payoff_arbitrage_basket_is_guaranteed():
     from strategies.engine import poly_yield_engine
     opp = {"strategy": "s3_buy_all", "suggested_usdc": 100.0, "profit_pct": 5.0,
+           "payoff_type": "guaranteed_arb",
            "legs": [{"outcome": "A", "price": 0.3}, {"outcome": "B", "price": 0.6}]}
     poly_yield_engine._annotate_payoff(opp)
     assert opp["max_profit_usdc"] == 5.0
     assert opp["max_loss_usdc"] == 5.0  # guaranteed: no downside range for a filled arb
+
+
+def test_annotate_payoff_conditional_multi_leg_keeps_asymmetric_risk():
+    """Dutching-style multi-leg bets on a SUBSET of outcomes carry real tail risk —
+    unlike a guaranteed arb basket, _annotate_payoff must not overwrite the
+    strategy's own (asymmetric) max_profit/max_loss with a false guarantee."""
+    from strategies.engine import poly_yield_engine
+    opp = {"strategy": "s20_dutching", "suggested_usdc": 100.0, "profit_pct": 8.0,
+           "payoff_type": "conditional_multi_leg",
+           "max_profit_usdc": 8.0, "max_loss_usdc": -100.0,
+           "legs": [{"outcome": "A", "price": 0.3}, {"outcome": "B", "price": 0.6}]}
+    poly_yield_engine._annotate_payoff(opp)
+    assert opp["max_profit_usdc"] == 8.0
+    assert opp["max_loss_usdc"] == -100.0
 
 
 def test_annotate_payoff_skips_lp_strategy():
@@ -147,12 +162,13 @@ async def test_exit_price_does_not_clobber_entry_fill_price(setup_test_db):
     assert pos_after["exit_price"] == pytest.approx(0.60)
 
 
-def test_settlement_records_exit_price_on_resolution():
+@pytest.mark.asyncio
+async def test_settlement_records_exit_price_on_resolution():
     from strategies.settlement import poly_yield_settlement
     pos = {"entry_price": 0.9, "cost_usdc": 10.0, "shares": 11.11,
            "actual_gas_usdc": 0.0, "strategy": "s1_novelty", "outcome": "no"}
     market_won = {"outcomes": '["Yes", "No"]', "outcomePrices": '["0.005", "0.995"]'}
-    pnl, outcome, status = poly_yield_settlement._compute_pnl(pos, market_won)
+    pnl, outcome, status = await poly_yield_settlement._compute_pnl(pos, market_won)
     assert status == "won"
     # exit_price for a win should be recorded as 1.0 in the DB update (checked via SQL literal
     # in _settle_open_positions; here we just confirm the win/loss classification is correct)
