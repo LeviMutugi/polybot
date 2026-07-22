@@ -1422,27 +1422,6 @@
             }
         };
 
-        function switchMainTab(tabName) {
-            document.getElementById('dashboardSection').style.display = 'none';
-            document.getElementById('dutchingArenaSection').style.display = 'none';
-            document.getElementById('keyVaultSection').style.display = 'none';
-
-            document.getElementById('tabBtnDashboard').classList.remove('active');
-            document.getElementById('tabBtnDutching').classList.remove('active');
-            document.getElementById('tabBtnKeyVault').classList.remove('active');
-
-            if (tabName === 'dashboard') {
-                document.getElementById('dashboardSection').style.display = 'block';
-                document.getElementById('tabBtnDashboard').classList.add('active');
-            } else if (tabName === 'dutching') {
-                document.getElementById('dutchingArenaSection').style.display = 'block';
-                document.getElementById('tabBtnDutching').classList.add('active');
-            } else if (tabName === 'keyvault') {
-                document.getElementById('keyVaultSection').style.display = 'block';
-                document.getElementById('tabBtnKeyVault').classList.add('active');
-            }
-        }
-
         // API Token Management & Global Fetch Interceptor
         let apiToken = localStorage.getItem('poly_yield_token') || '';
         const originalFetch = window.fetch;
@@ -2227,6 +2206,7 @@
                 's17_sniper': 'S17 Sniper',
                 's18_straddle': 'S18 Straddle',
                 's19_longshot_yes': 'S19 Longshot YES',
+                's20_dutching': 'S20 Dutching',
                 'favorite_compounding': 'Fav Compound',
                 'copy_trading': 'Copy Trade',
                 'manual': 'Manual'
@@ -2518,7 +2498,17 @@
             { key: 's16_poll_drift', label: 'S16 Poll Drift', params: [] },
             { key: 's17_sniper', label: 'S17 Liquidity Sniper', params: [] },
             { key: 's18_straddle', label: 'S18 Catalyst Straddle', params: [] },
-            { key: 's19_longshot_yes', label: 'S19 Longshot YES', params: [] }
+            { key: 's19_longshot_yes', label: 'S19 Longshot YES', params: [] },
+            {
+                key: 's20_dutching',
+                label: 'S20 Top-N Dutching',
+                params: [
+                    { key: 'top_n', label: 'Top N Candidates', type: 'number', step: '1', unit: '' },
+                    { key: 'max_set_price', label: 'Max Set Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'min_roi_pct', label: 'Min ROI', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            }
         ];
 
         let isStrategyGridBuilt = false;
@@ -3012,8 +3002,8 @@
 
             const sortVal = document.getElementById("dutchingSort")?.value || "roi_desc";
             cachedDutchingOpps.sort((a, b) => {
-                const aRoi = a.expected_roi_pct || a.profit_pct || 0;
-                const bRoi = b.expected_roi_pct || b.profit_pct || 0;
+                const aRoi = a.profit_pct || 0;
+                const bRoi = b.profit_pct || 0;
                 const aCost = a.p_sum || (a.legs || []).reduce((acc, l) => acc + (l.price || 0), 0);
                 const bCost = b.p_sum || (b.legs || []).reduce((acc, l) => acc + (l.price || 0), 0);
                 
@@ -3027,8 +3017,8 @@
                 const legs = opp.legs || [];
                 const topCandidates = opp.top_candidates || legs.map(l => l.outcome);
                 const pSum = opp.p_sum || legs.reduce((acc, l) => acc + (l.price || 0), 0);
-                const profit = opp.net_profit_if_hit || opp.max_profit_usdc || 0;
-                const roiVal = opp.expected_roi_pct || opp.profit_pct || 0;
+                const profit = opp.max_profit_usdc || 0;
+                const roiVal = opp.profit_pct || 0;
                 const roiStr = roiVal >= 0 ? `+${roiVal.toFixed(1)}` : roiVal.toFixed(1);
                 
                 const profitStr = profit >= 0 ? `$${profit.toFixed(2)}` : `-$${Math.abs(profit).toFixed(2)}`;
@@ -3312,22 +3302,28 @@
                 }
             }
 
+            if (!opp.id) {
+                alert("❌ This opportunity hasn't been persisted by a scan yet — wait for the next scan cycle and try again.");
+                return;
+            }
+
             try {
                 const r = await fetch("/api/dutching/execute", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
+                        opportunity_id: opp.id,
                         instance_id: "inst_manual_1",
-                        market_id: opp.market_id || "manual_mkt",
-                        market_title: opp.market_title || "Dutch Trade",
-                        legs: opp.legs || [],
-                        stake_usdc: opp.target_total_cost || 10.0,
                         p_model_top_set: avg_p_top,
                         p_tail_risk: avg_p_tail,
                         confidence: avg_conf
                     })
                 });
                 const res = await r.json();
+                if (!r.ok) {
+                    alert(`❌ Execution failed: ${res.detail || 'Unknown error'}`);
+                    return;
+                }
                 alert(`⚡ Executed Dutching trade! Trade ID: ${res.trade_id}. New Balance: $${res.new_balance.toFixed(2)}`);
                 fetchWalletBalance();
             } catch (e) {

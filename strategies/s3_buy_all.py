@@ -18,7 +18,8 @@ class BuyAllArbitrageStrategy(BaseStrategy):
             name="Buy-All Arb",
             risk_level="Low",
             market_type="Multi-outcome",
-            default_exec_mode="auto"
+            default_exec_mode="auto",
+            payoff_type="guaranteed_arb"
         )
 
     async def scan(self, markets: List[dict], balance: float, http_client: httpx.AsyncClient) -> List[dict]:
@@ -91,7 +92,8 @@ class BuyAllArbitrageStrategy(BaseStrategy):
                         "fill_price": leg_fill_price,
                         "shares": leg_shares,
                         "token_id": token_id,
-                        "stake_usdc": round(leg_target_usdc, 2)
+                        "stake_usdc": round(leg_target_usdc, 2),
+                        "market_id": str(market.get("id", ""))
                     })
 
                 # Bottle-neck leg determines the payout floor
@@ -130,6 +132,7 @@ class BuyAllArbitrageStrategy(BaseStrategy):
                     "action": "buy_all",
                     "exec_mode": exec_mode,
                     "suggested_usdc": round(total_cap, 2),
+                    "payoff_type": self.payoff_type,
                     "legs": leg_details,
                     "status": "open",
                     "notes": f"Arbitrage sum = {sum_prices:.4f} < 1.00. Net profit ${real_profit_usdc:.2f} after gas ${total_gas:.2f}.",

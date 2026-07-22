@@ -211,7 +211,9 @@ def init_db():
                 mode TEXT DEFAULT 'paper',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 settled_at TIMESTAMP,
-                pnl_usdc REAL
+                pnl_usdc REAL,
+                position_id TEXT                -- links to the authoritative poly_yield_positions row;
+                                                 -- this table only carries arena/LLM-eval metadata now
             );
         """)
         
@@ -230,6 +232,10 @@ def init_db():
             ("poly_yield_positions", "max_loss_usdc", "REAL"),
             ("poly_yield_positions", "executed_by", "TEXT"),
             ("poly_yield_positions", "exit_price", "REAL"),
+            ("poly_yield_positions", "legs", "TEXT"),
+            ("poly_yield_positions", "payoff_type", "TEXT DEFAULT 'directional'"),
+            ("poly_yield_opportunities", "payoff_type", "TEXT DEFAULT 'directional'"),
+            ("dutching_trades", "position_id", "TEXT"),
         ]
         for table_name, col_name, col_type in migration_cols:
             try:
@@ -317,6 +323,10 @@ def init_db():
             ("favorite_compounding.min_apy", "5.0"),
             ("copy_trading.max_position_pct", "0.05"),
             ("copy_trading.target_wallets", "[]"), # JSON array of addresses to track
+            ("s20_dutching.top_n", "3"),
+            ("s20_dutching.max_set_price", "0.92"),
+            ("s20_dutching.min_roi_pct", "3.0"),
+            ("s20_dutching.max_position_pct", "0.08"),
             # Money Management
             ("portfolio.kelly_fraction", "0.10"),
             ("portfolio.paper_balance", "1000.0"),
