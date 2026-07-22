@@ -558,7 +558,7 @@ async def allocate_dutching_instance(args: DutchingAllocateArgs, _=Depends(verif
     return {"id": instance_id, "provider": args.provider, "allocated_budget_usdc": args.allocated_budget_usdc}
 
 @app.post("/api/dutching/evaluate")
-async def evaluate_dutching_market(args: DutchingEvaluateArgs):
+async def evaluate_dutching_market(args: DutchingEvaluateArgs, _=Depends(verify_token)):
     """Run side-by-side market evaluation across specified LLM providers."""
     from services.llm_provider import llm_provider
     results = {}
@@ -633,15 +633,22 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
                     logging.getLogger(__name__).error(f"Failed to place CLOB order for dutching leg {token_id}: {e}")
                     leg["error"] = str(e)
     
-    # Deduct stake from wallet (handles paper logic internally if paper)
-    tx = wallet_service.deduct(
-        mode=mode,
-        amount=args.stake_usdc,
-        tx_type="dutching_trade_stake",
-        description=f"Dutching stake on {args.market_title[:30]}"
-    )
-    
+    # Deduct stake from the paper wallet. Live mode has no tracked "wallet" balance —
+    # cost is whatever the CLOB fills above actually charged on-chain — so only paper
+    # mode debits here, matching the convention used by the main engine's executor.
     trade_id = f"dutch_tx_{uuid.uuid4().hex[:8]}"
+    if mode == "paper":
+        from services.wallet import InsufficientFundsError
+        try:
+            wallet_service.debit(
+                "paper", args.stake_usdc, "dutching_trade_stake",
+                position_id=trade_id,
+                description=f"Dutching stake on {args.market_title[:30]}",
+                idempotency_key=f"open_{trade_id}"
+            )
+        except InsufficientFundsError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     sum_market_price = sum(float(l.get("market_price", l.get("price", 0))) for l in args.legs)
     sum_fill_price = sum(float(l.get("fill_price", l.get("price", 0))) for l in args.legs)
     
@@ -660,19 +667,27 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
                 json.dumps(args.legs), mode
             ]
         )
+        # Ensure the arena instance row exists (e.g. the "Quick Trade" button targets
+        # inst_manual_1, which is never created by the arena leaderboard seeding path)
+        # so the budget/position update below isn't silently dropped.
+        conn.execute(
+            "INSERT OR IGNORE INTO dutching_arena_instances (id, provider, model_name) VALUES (?, ?, ?)",
+            [args.instance_id, args.instance_id, "manual"]
+        )
         # Update arena instance used budget
         conn.execute(
             "UPDATE dutching_arena_instances SET used_budget_usdc = used_budget_usdc + ?, active_positions = active_positions + 1 WHERE id = ?",
             [args.stake_usdc, args.instance_id]
         )
         conn.commit()
-        
+
+    new_balance = await portfolio_allocator._get_wallet_balance()
     return {
         "status": "executed",
         "trade_id": trade_id,
         "mode": mode,
         "stake_usdc": args.stake_usdc,
-        "new_balance": tx["balance_after"]
+        "new_balance": new_balance
     }
 
 # --- WebSocket Telemetry Endpoint ---

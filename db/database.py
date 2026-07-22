@@ -317,6 +317,10 @@ def init_db():
             ("favorite_compounding.min_apy", "5.0"),
             ("copy_trading.max_position_pct", "0.05"),
             ("copy_trading.target_wallets", "[]"), # JSON array of addresses to track
+            ("s20_dutching.top_n", "3"),
+            ("s20_dutching.max_set_price", "0.92"),
+            ("s20_dutching.min_roi_pct", "3.0"),
+            ("s20_dutching.max_position_pct", "0.08"),
             # Money Management
             ("portfolio.kelly_fraction", "0.10"),
             ("portfolio.paper_balance", "1000.0"),

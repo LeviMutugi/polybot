@@ -93,11 +93,13 @@ class DutchingStrategy(BaseStrategy):
                 top_set = parsed_candidates[:top_n]
 
                 p_sum = sum(c["price"] for c in top_set)
-                if p_sum <= 0:
+                if p_sum <= 0 or p_sum > max_set_price:
                     continue
 
                 # Expected ROI if one of top_set wins
                 theoretical_roi_pct = ((1.0 - p_sum) / p_sum) * 100
+                if theoretical_roi_pct < min_roi_pct:
+                    continue
 
                 # Theoretical set shares for budget
                 target_total_cap = balance * max_pos_pct
@@ -167,7 +169,6 @@ class DutchingStrategy(BaseStrategy):
                     "top_candidates": [c["name"] for c in top_set],
                     "entry_price": p_sum,
                     "exec_mode": self.default_exec_mode,
-                    "suggested_usdc": actual_total_cost,
                     "p_sum": round(p_sum, 4),
                     "suggested_usdc": round(actual_total_cost, 2),
                     "profit_pct": round(actual_roi_pct, 2),
