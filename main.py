@@ -472,6 +472,209 @@ async def wallet_health():
     from services.wallet import wallet_service
     return wallet_service.verify_conservation("paper")
 
+# --- Dutching Bot & Multi-LLM Arena Endpoints ---
+
+class DutchingAllocateArgs(BaseModel):
+    provider: str
+    model_name: str = ""
+    allocated_budget_usdc: float
+
+class DutchingEvaluateArgs(BaseModel):
+    market_question: str
+    market_description: str = ""
+    candidates: list
+    top_set_names: list
+    providers: list = ["openai", "anthropic", "kimi", "deepseek"]
+
+class DutchingExecuteArgs(BaseModel):
+    instance_id: str
+    market_id: str
+    market_title: str
+    legs: list
+    stake_usdc: float
+    p_model_top_set: float = 0.90
+    p_tail_risk: float = 0.10
+    confidence: float = 0.80
+
+@app.get("/api/dutching/arena")
+async def get_dutching_arena():
+    """Get active multi-LLM model allocations & leaderboard statistics."""
+    conn = get_sqlite()
+    with _sqlite_lock:
+        rows = conn.execute(
+            "SELECT * FROM dutching_arena_instances ORDER BY total_pnl DESC, created_at ASC"
+        ).fetchall()
+        if not rows:
+            defaults = [
+                ("inst_openai", "openai", "gpt-4o", 10.0),
+                ("inst_anthropic", "anthropic", "claude-3-5-sonnet-20241022", 10.0),
+                ("inst_kimi", "kimi", "moonshot-v1-8k", 10.0),
+                ("inst_deepseek", "deepseek", "deepseek-chat", 10.0)
+            ]
+            for i_id, prov, model, budget in defaults:
+                conn.execute(
+                    "INSERT OR IGNORE INTO dutching_arena_instances (id, provider, model_name, allocated_budget_usdc) VALUES (?, ?, ?, ?)",
+                    [i_id, prov, model, budget]
+                )
+            conn.commit()
+            rows = conn.execute(
+                "SELECT * FROM dutching_arena_instances ORDER BY total_pnl DESC, created_at ASC"
+            ).fetchall()
+    results = []
+    for r in rows:
+        d = dict(r)
+        prov = d["provider"].lower()
+        # keystore might store keys under the exact provider name (e.g. 'openai') 
+        # or provider-specific suffixes. The JS uses keys like 'openai', 'anthropic', etc.
+        d["has_key"] = bool(keystore.get_decrypted(prov))
+        results.append(d)
+        
+    return results
+
+@app.post("/api/dutching/arena/allocate")
+async def allocate_dutching_instance(args: DutchingAllocateArgs, _=Depends(verify_token)):
+    """Allocate a dedicated USDC wallet balance to an LLM provider instance."""
+    if args.allocated_budget_usdc < 0:
+        raise HTTPException(status_code=400, detail="Allocation budget must be non-negative")
+    
+    conn = get_sqlite()
+    instance_id = f"inst_{args.provider.lower()}_{uuid.uuid4().hex[:6]}"
+    default_models = {
+        "openai": "gpt-4o",
+        "anthropic": "claude-3-5-sonnet-20241022",
+        "kimi": "moonshot-v1-8k",
+        "deepseek": "deepseek-chat"
+    }
+    model_name = args.model_name or default_models.get(args.provider.lower(), "custom-model")
+    
+    with _sqlite_lock:
+        conn.execute(
+            """INSERT OR REPLACE INTO dutching_arena_instances
+               (id, provider, model_name, allocated_budget_usdc, updated_at)
+               VALUES (?, ?, ?, ?, datetime('now'))""",
+            [instance_id, args.provider.lower(), model_name, args.allocated_budget_usdc]
+        )
+        conn.commit()
+    return {"id": instance_id, "provider": args.provider, "allocated_budget_usdc": args.allocated_budget_usdc}
+
+@app.post("/api/dutching/evaluate")
+async def evaluate_dutching_market(args: DutchingEvaluateArgs):
+    """Run side-by-side market evaluation across specified LLM providers."""
+    from services.llm_provider import llm_provider
+    results = {}
+    
+    async def _eval_one(prov: str):
+        return prov, await llm_provider.evaluate_market(
+            provider_key=prov,
+            market_question=args.market_question,
+            market_description=args.market_description,
+            candidates=args.candidates,
+            top_set_names=args.top_set_names
+        )
+
+    tasks = [_eval_one(p) for p in args.providers]
+    eval_outs = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    for item in eval_outs:
+        if isinstance(item, tuple):
+            prov, res = item
+            results[prov] = res
+        elif isinstance(item, Exception):
+            _log.warning("Evaluation exception in arena: %s", item)
+
+    return {"market_question": args.market_question, "evaluations": results}
+
+@app.post("/api/dutching/keys")
+async def save_dutching_key(args: KeySubmit, _=Depends(verify_token)):
+    """Save encrypted API key for an LLM provider into Key Vault."""
+    if not args.service or not args.value:
+        raise HTTPException(status_code=400, detail="Service and key value are required")
+    res = keystore.add_key(args.service.lower(), args.value, args.label or f"{args.service} LLM Key")
+    return {"status": "saved", "service": args.service, "key_id": res["id"]}
+
+@app.post("/api/dutching/execute")
+async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_token)):
+    """Execute multi-leg Dutching order using paper balance or live CLOB."""
+    if args.stake_usdc <= 0:
+        raise HTTPException(status_code=400, detail="Stake USDC must be > 0")
+    
+    mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
+    from services.wallet import wallet_service
+    
+    if mode == "live":
+        from services.keystore import keystore
+        pk = keystore.get_decrypted("polymarket_wallet")
+        if not pk:
+            raise HTTPException(status_code=400, detail="Polymarket wallet key not configured for live trading")
+        
+        from py_clob_client.client import ClobClient
+        from py_clob_client.clob_types import OrderArgs
+        chain_id = await cfg.get_typed("polygon_chain_id", int, 137)
+        clob_url = settings.polymarket_clob_url.rstrip("/")
+        if chain_id == 80002:
+            clob_url = "https://clob-testnet.polymarket.com"
+        
+        clob_client = ClobClient(host=clob_url, key=pk, chain_id=chain_id)
+        
+        # Execute legs sequentially
+        for leg in args.legs:
+            price = float(leg.get("fill_price", leg.get("price", 0)))
+            size = float(leg.get("shares", 0))
+            token_id = leg.get("token_id")
+            if token_id and price > 0 and size > 0:
+                try:
+                    order = clob_client.create_order(OrderArgs(
+                        price=price, size=size, side="BUY", token_id=token_id
+                    ))
+                    resp = clob_client.post_order(order)
+                    leg["order_id"] = resp.get("orderID")
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Failed to place CLOB order for dutching leg {token_id}: {e}")
+                    leg["error"] = str(e)
+    
+    # Deduct stake from wallet (handles paper logic internally if paper)
+    tx = wallet_service.deduct(
+        mode=mode,
+        amount=args.stake_usdc,
+        tx_type="dutching_trade_stake",
+        description=f"Dutching stake on {args.market_title[:30]}"
+    )
+    
+    trade_id = f"dutch_tx_{uuid.uuid4().hex[:8]}"
+    sum_market_price = sum(float(l.get("market_price", l.get("price", 0))) for l in args.legs)
+    sum_fill_price = sum(float(l.get("fill_price", l.get("price", 0))) for l in args.legs)
+    
+    conn = get_sqlite()
+    with _sqlite_lock:
+        conn.execute(
+            """INSERT INTO dutching_trades
+               (id, instance_id, market_id, market_title, top_candidates_json, sum_market_price,
+                sum_fill_price, p_model_top_set, p_tail_risk, confidence, stake_usdc, legs_json, mode)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                trade_id, args.instance_id, args.market_id, args.market_title,
+                json.dumps([l.get("outcome") for l in args.legs]),
+                sum_market_price, sum_fill_price, args.p_model_top_set,
+                args.p_tail_risk, args.confidence, args.stake_usdc,
+                json.dumps(args.legs), mode
+            ]
+        )
+        # Update arena instance used budget
+        conn.execute(
+            "UPDATE dutching_arena_instances SET used_budget_usdc = used_budget_usdc + ?, active_positions = active_positions + 1 WHERE id = ?",
+            [args.stake_usdc, args.instance_id]
+        )
+        conn.commit()
+        
+    return {
+        "status": "executed",
+        "trade_id": trade_id,
+        "mode": mode,
+        "stake_usdc": args.stake_usdc,
+        "new_balance": tx["balance_after"]
+    }
+
 # --- WebSocket Telemetry Endpoint ---
 
 @app.websocket("/ws")
@@ -499,6 +702,12 @@ async def websocket_endpoint(websocket: WebSocket):
             active_websockets.remove(websocket)
 
 # --- Serving Front-End Dashboard ---
+
+from fastapi import Response
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard(request: Request):

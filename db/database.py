@@ -176,6 +176,43 @@ def init_db():
                 description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            -- Dutching Multi-LLM Arena Instance Allocations
+            CREATE TABLE IF NOT EXISTS dutching_arena_instances (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,         -- openai, anthropic, kimi, deepseek
+                model_name TEXT NOT NULL,       -- gpt-4o, claude-3-5-sonnet-20241022, etc.
+                allocated_budget_usdc REAL NOT NULL DEFAULT 10.0,
+                used_budget_usdc REAL NOT NULL DEFAULT 0.0,
+                active_positions INTEGER NOT NULL DEFAULT 0,
+                win_count INTEGER NOT NULL DEFAULT 0,
+                loss_count INTEGER NOT NULL DEFAULT 0,
+                total_pnl REAL NOT NULL DEFAULT 0.0,
+                status TEXT DEFAULT 'active',    -- active, paused, drained
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            -- Dutching Multi-Leg Executions
+            CREATE TABLE IF NOT EXISTS dutching_trades (
+                id TEXT PRIMARY KEY,
+                instance_id TEXT NOT NULL,
+                market_id TEXT NOT NULL,
+                market_title TEXT NOT NULL,
+                top_candidates_json TEXT NOT NULL,
+                sum_market_price REAL NOT NULL,
+                sum_fill_price REAL NOT NULL,
+                p_model_top_set REAL NOT NULL,
+                p_tail_risk REAL NOT NULL,
+                confidence REAL NOT NULL,
+                stake_usdc REAL NOT NULL,
+                legs_json TEXT NOT NULL,
+                status TEXT DEFAULT 'open',     -- open, won, lost, settled
+                mode TEXT DEFAULT 'paper',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                settled_at TIMESTAMP,
+                pnl_usdc REAL
+            );
         """)
         
         # Safe migration for existing databases: Add columns if they do not exist
@@ -229,6 +266,7 @@ def init_db():
             ("s17_sniper.enabled", "true"),
             ("s18_straddle.enabled", "true"),
             ("s19_longshot_yes.enabled", "true"),
+            ("s20_dutching.enabled", "true"),
             ("favorite_compounding.enabled", "true"),
             ("copy_trading.enabled", "true"),
             # Strategy execution modes: auto, semi, manual
@@ -250,6 +288,7 @@ def init_db():
             ("s17_sniper.exec_mode", "auto"),
             ("s18_straddle.exec_mode", "manual"),
             ("s19_longshot_yes.exec_mode", "semi"),
+            ("s20_dutching.exec_mode", "manual"),
             ("favorite_compounding.exec_mode", "auto"),
             ("copy_trading.exec_mode", "auto"),
             # Strategy parameters

@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent
 class Settings(BaseSettings):
     # Host & Port
     host: str = "127.0.0.1"
-    port: int = 8080
+    port: int = 8000
     api_secret: str = "poly_yield_default_secret_key_change_me"
 
     # Polymarket Settings

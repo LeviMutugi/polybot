@@ -63,6 +63,10 @@ class PolyYieldSettlement:
                     settled = await self._settle_open_positions()
                     if settled > 0:
                         print(f"[PolyYieldSettlement] Successfully resolved {settled} positions.")
+                        
+                    dutch_settled = await self._settle_dutching_trades()
+                    if dutch_settled > 0:
+                        print(f"[PolyYieldSettlement] Successfully resolved {dutch_settled} Dutching trades.")
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
@@ -241,6 +245,72 @@ class PolyYieldSettlement:
             except Exception:
                 pass
 
+        return settled_count
+
+    async def _settle_dutching_trades(self) -> int:
+        conn = get_sqlite()
+        with _sqlite_lock:
+            rows = conn.execute("SELECT * FROM dutching_trades WHERE status = 'open'").fetchall()
+        
+        settled_count = 0
+        for row in rows:
+            trade = dict(row)
+            market_id = trade.get("market_id")
+            if not market_id:
+                continue
+
+            market = await self._fetch_market(str(market_id))
+            if not market or not market.get("closed"):
+                continue
+
+            winner = self._winning_outcome(market)
+            if not winner:
+                continue
+                
+            legs = json.loads(trade.get("legs_json", "[]"))
+            
+            won = False
+            for leg in legs:
+                if leg.get("outcome", "").lower() == winner.lower():
+                    won = True
+                    break
+                    
+            status = "won" if won else "lost"
+            stake = float(trade.get("stake_usdc", 0.0))
+            
+            if won:
+                min_shares = min(float(l.get("shares", 0)) for l in legs) if legs else 0
+                payout = min_shares * 1.0
+                pnl = payout - stake
+            else:
+                payout = 0.0
+                pnl = -stake
+
+            # Credit paper wallet
+            if trade.get("mode") == "paper":
+                from services.wallet import wallet_service
+                wallet_service.credit("paper", payout, "dutching_settlement",
+                                      position_id=trade["id"],
+                                      description=f"Dutch {'Won' if won else 'Lost'}: {trade.get('market_title', '')[:30]}",
+                                      idempotency_key=f"dutch_settle_{trade['id']}")
+
+            with _sqlite_lock:
+                conn.execute("""
+                    UPDATE dutching_trades
+                    SET status = ?, settled_at = datetime('now'), pnl_usdc = ?
+                    WHERE id = ?
+                """, [status, pnl, trade["id"]])
+                
+                # Update arena instances
+                if status == "won":
+                    conn.execute("UPDATE dutching_arena_instances SET win_count = win_count + 1, total_pnl = total_pnl + ?, active_positions = active_positions - 1 WHERE id = ?", [pnl, trade["instance_id"]])
+                else:
+                    conn.execute("UPDATE dutching_arena_instances SET loss_count = loss_count + 1, total_pnl = total_pnl + ?, active_positions = active_positions - 1 WHERE id = ?", [pnl, trade["instance_id"]])
+                    
+                conn.commit()
+
+            settled_count += 1
+            
         return settled_count
 
     def _winning_outcome(self, market: dict) -> Optional[str]:

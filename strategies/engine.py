@@ -182,7 +182,7 @@ class PolyYieldEngine:
         await self._broadcast({"type": "scan_complete", "scan_count": self._scan_count, "opps_found": len(all_opps)})
         print(f"[PolyYieldEngine] Scan #{self._scan_count} finished. {len(all_opps)} opportunities found.")
 
-    async def _fetch_markets(self, limit: int = 200) -> list:
+    async def _fetch_markets(self, limit: int = 500) -> list:
         try:
             # Load current network chain ID
             chain_id = await cfg.get_typed("polygon_chain_id", int, settings.polygon_chain_id)
