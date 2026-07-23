@@ -251,10 +251,17 @@ def test_winner_requires_definitive_price():
 # ---------- Paper trade lifecycle still conserves money after engine rework ----------
 
 @pytest.mark.asyncio
-async def test_paper_trade_wallet_conservation(setup_test_db):
+async def test_paper_trade_wallet_conservation(setup_test_db, monkeypatch):
     from db.database import get_sqlite, _sqlite_lock
     from strategies.engine import poly_yield_engine
     from services.wallet import wallet_service
+
+    # Deterministic simulated gas fee — the engine correctly debits this on open
+    # and exit (so paper PnL isn't systematically optimistic vs. live); pin it so
+    # the conservation math below isn't at the mercy of live gas/MATIC price lookups.
+    import strategies.engine as engine_mod
+    async def mock_gas(): return 0.01
+    monkeypatch.setattr(engine_mod.gas_tracker, "get_gas_cost_usdc", mock_gas)
 
     cfg.set("poly_yield.enabled", "true")
     cfg.set("poly_yield.active_mode", "paper")
@@ -269,7 +276,8 @@ async def test_paper_trade_wallet_conservation(setup_test_db):
     await poly_yield_engine._upsert_opportunity(opp)
     res = await poly_yield_engine.execute_opportunity(opp)
     assert res["success"] is True
-    assert wallet_service.get_balance("paper") == pytest.approx(900.0)
+    # Stake debited plus the simulated gas fee on open
+    assert wallet_service.get_balance("paper") == pytest.approx(900.0 - 0.01)
 
     conn = get_sqlite()
     with _sqlite_lock:
@@ -278,8 +286,8 @@ async def test_paper_trade_wallet_conservation(setup_test_db):
 
     exit_res = await poly_yield_engine.exit_position(pos["id"], current_price=0.60, reason="Manual Exit")
     assert exit_res["success"] is True
-    # 200 shares sold at $0.60 = $120 back
-    assert wallet_service.get_balance("paper") == pytest.approx(1020.0)
+    # 200 shares sold at $0.60 = $120 back, minus the simulated exit gas fee
+    assert wallet_service.get_balance("paper") == pytest.approx(1020.0 - 0.02)
 
     health = wallet_service.verify_conservation("paper")
     assert health["valid"], health
