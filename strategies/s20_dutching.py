@@ -143,6 +143,13 @@ class DutchingStrategy(BaseStrategy):
 
                     leg_details.append({
                         "outcome": leg["name"],
+                        # "price" is the field name the shared execution pipeline
+                        # (engine._execute_multi_leg) reads for every strategy's legs —
+                        # it MUST be present or execution aborts with "Invalid multi-leg
+                        # prices" before ever touching the order book. "market_price" is
+                        # kept as an alias since the frontend and the arena trade-metadata
+                        # insert in main.py already read it under that name.
+                        "price": leg["price"],
                         "market_price": leg["price"],
                         "fill_price": fill_price,
                         "shares": leg_shares,
@@ -170,7 +177,7 @@ class DutchingStrategy(BaseStrategy):
                     "market_id": event.get("id"),
                     "market_title": event.get("title", "Multi-outcome Dutching Market"),
                     "market_slug": event.get("slug", ""),
-                    "url": get_market_url(event),
+                    "market_url": get_market_url(event),
                     "outcomes": outcomes,
                     "top_candidates": [c["name"] for c in top_set],
                     # poly_yield_positions.outcome is NOT NULL — this is a human-readable

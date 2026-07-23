@@ -859,6 +859,26 @@
                     <label class="control-label">Consecutive Loss Limit</label>
                     <input type="number" id="consecLossLimit" class="control-input" value="3" onchange="updateConsecLossLimit(this)">
                 </div>
+                <div style="border-top: 1px solid var(--border); margin: 16px 0 12px; padding-top: 12px;">
+                    <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px;">
+                        Default Bot Risk Exits
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Applied automatically to bot-triggered positions at entry (manual trades keep whatever you set on the Manual Trade panel). Leave blank to disable — off by default.
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Default Stop Loss (%)</label>
+                    <input type="number" id="defaultStopLossPct" class="control-input" step="0.5" placeholder="disabled" onchange="updateDefaultRiskPct('portfolio.default_stop_loss_pct', this)">
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Default Take Profit (%)</label>
+                    <input type="number" id="defaultTakeProfitPct" class="control-input" step="0.5" placeholder="disabled" onchange="updateDefaultRiskPct('portfolio.default_take_profit_pct', this)">
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Default Trailing Stop (%)</label>
+                    <input type="number" id="defaultTrailingStopPct" class="control-input" step="0.5" placeholder="disabled" onchange="updateDefaultRiskPct('portfolio.default_trailing_stop_pct', this)">
+                </div>
             </div>
 
             <!-- Strategy Allocations sliders -->
@@ -1263,8 +1283,15 @@
         <!-- Multi-LLM Side-by-Side Model Arena Cards -->
         <div class="glass-panel" style="margin-bottom: 32px;">
             <div class="panel-title">
-                <span>MULTI-LLM SIDE-BY-SIDE ARENA</span>
+                <span style="display:flex; align-items:center; gap:10px;">
+                    MULTI-LLM SIDE-BY-SIDE ARENA
+                    <span class="badge badge-med" id="arenaModeBadge">PAPER MODE</span>
+                </span>
                 <button class="btn btn-emerald" onclick="openKeyModal()" style="font-size: 11px; padding: 6px 12px;">🔑 Manage API Keys</button>
+            </div>
+            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:16px;">
+                Budgets, win rate and PnL below are scoped to <strong id="arenaModeText">paper</strong> mode — switch the Dashboard's
+                Live Trading Mode toggle to see live-mode arena numbers instead. They never blend together.
             </div>
             <div class="stats-grid" id="arenaModelCards">
                 <!-- OpenAI GPT-4o Card -->
@@ -1278,6 +1305,7 @@
                         <input type="number" id="alloc_openai" class="control-input" value="10.0" style="font-weight: 700;">
                         <button class="btn" style="padding: 8px 12px; font-size: 11px;" onclick="saveModelAllocation('openai')">Set</button>
                     </div>
+                    <div style="font-size:11px; color:var(--text-secondary); margin-top:-10px; margin-bottom:12px;" id="used_openai">$0.00 / $10.00 used</div>
                     <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-secondary);">Win Rate</span>
                         <span style="color: var(--cyber-emerald); font-weight: 600;" id="wr_openai">—</span>
@@ -1299,6 +1327,7 @@
                         <input type="number" id="alloc_anthropic" class="control-input" value="10.0" style="font-weight: 700;">
                         <button class="btn" style="padding: 8px 12px; font-size: 11px;" onclick="saveModelAllocation('anthropic')">Set</button>
                     </div>
+                    <div style="font-size:11px; color:var(--text-secondary); margin-top:-10px; margin-bottom:12px;" id="used_anthropic">$0.00 / $10.00 used</div>
                     <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-secondary);">Win Rate</span>
                         <span style="color: var(--cyber-emerald); font-weight: 600;" id="wr_anthropic">—</span>
@@ -1320,6 +1349,7 @@
                         <input type="number" id="alloc_kimi" class="control-input" value="10.0" style="font-weight: 700;">
                         <button class="btn" style="padding: 8px 12px; font-size: 11px;" onclick="saveModelAllocation('kimi')">Set</button>
                     </div>
+                    <div style="font-size:11px; color:var(--text-secondary); margin-top:-10px; margin-bottom:12px;" id="used_kimi">$0.00 / $10.00 used</div>
                     <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-secondary);">Win Rate</span>
                         <span style="color: var(--cyber-emerald); font-weight: 600;" id="wr_kimi">—</span>
@@ -1341,6 +1371,7 @@
                         <input type="number" id="alloc_deepseek" class="control-input" value="10.0" style="font-weight: 700;">
                         <button class="btn" style="padding: 8px 12px; font-size: 11px;" onclick="saveModelAllocation('deepseek')">Set</button>
                     </div>
+                    <div style="font-size:11px; color:var(--text-secondary); margin-top:-10px; margin-bottom:12px;" id="used_deepseek">$0.00 / $10.00 used</div>
                     <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-secondary);">Win Rate</span>
                         <span style="color: var(--cyber-emerald); font-weight: 600;" id="wr_deepseek">—</span>
@@ -1350,6 +1381,13 @@
                         <span style="color: var(--cyber-emerald); font-weight: 600;" id="pnl_deepseek">$0.00</span>
                     </div>
                 </div>
+            </div>
+            <div id="manualQuickTradeStats" style="display:none; margin-top:16px; padding:12px 16px; background:var(--surface-alt); border:1px solid var(--border); border-radius:var(--radius-md); font-size:12px; justify-content:space-between; align-items:center;">
+                <span style="color:var(--text-secondary);">🖐 Manual / Consensus Quick Trades (not attributed to a single model)</span>
+                <span>
+                    Win Rate: <strong id="manualQuickWinRate">—</strong>
+                    &nbsp;&nbsp;Net PnL: <strong id="manualQuickPnl">$0.00</strong>
+                </span>
             </div>
         </div>
 
@@ -1690,6 +1728,9 @@
                 document.getElementById("dailyLossLimit").value = msg.config["portfolio.daily_loss_limit"] || "50.0";
                 document.getElementById("consecLossLimit").value = msg.config["portfolio.consecutive_loss_limit"] || "3";
                 document.getElementById("circuitBreakerSwitch").checked = msg.config["portfolio.circuit_breaker_active"] === "true";
+                document.getElementById("defaultStopLossPct").value = msg.config["portfolio.default_stop_loss_pct"] || "";
+                document.getElementById("defaultTakeProfitPct").value = msg.config["portfolio.default_take_profit_pct"] || "";
+                document.getElementById("defaultTrailingStopPct").value = msg.config["portfolio.default_trailing_stop_pct"] || "";
                 
                 updateChainIndicator(msg.config["polygon_chain_id"] || 137);
                 updateStatsUI(msg.stats);
@@ -2194,6 +2235,7 @@
             });
             setTimeout(fetchWalletBalance, 500); // Refresh balance UI
             updateStatsUI(); // Immediately refresh stats for new mode
+            fetchDutchingArena(); // Arena budgets/leaderboard are mode-scoped too
         }
 
         async function updateEngineState(el) {
@@ -2254,6 +2296,20 @@
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ key: "portfolio.consecutive_loss_limit", value: val.toString() })
+            });
+        }
+
+        async function updateDefaultRiskPct(key, el) {
+            const raw = el.value.trim();
+            if (raw !== "" && (isNaN(parseFloat(raw)) || parseFloat(raw) < 0)) {
+                await CustomDialog.alert("Enter a non-negative percentage, or leave blank to disable.", "Invalid Value", "⚠️");
+                return;
+            }
+            logEvent(`[SYSTEM] ${key} set to ${raw || "(disabled)"}`);
+            await fetch("/api/poly-yield/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: key, value: raw })
             });
         }
 
@@ -3105,28 +3161,71 @@
             }
         }
 
+        // instance_id per real provider for the currently-loaded arena mode, keyed by
+        // provider name — populated by fetchDutchingArena(), read by "Trade This Read".
+        let arenaInstanceIds = {};
+        let arenaCurrentMode = "paper";
+
         async function fetchDutchingArena() {
             try {
                 const r = await fetch("/api/dutching/arena");
                 if (!r.ok) return;
-                const instances = await r.json();
-                if (!Array.isArray(instances)) return;
+                const data = await r.json();
+                const instances = Array.isArray(data) ? data : (data.instances || []);
+                arenaCurrentMode = Array.isArray(data) ? arenaCurrentMode : (data.mode || "paper");
+
+                const modeBadge = document.getElementById("arenaModeBadge");
+                if (modeBadge) modeBadge.innerText = `${arenaCurrentMode.toUpperCase()} MODE`;
+                const modeText = document.getElementById("arenaModeText");
+                if (modeText) modeText.innerText = arenaCurrentMode;
 
                 let totalAlloc = 0;
                 let totalPnl = 0;
                 let totalWins = 0;
                 let totalLosses = 0;
+                let activeModelCount = 0;
+                const knownProviders = ["openai", "anthropic", "kimi", "deepseek"];
 
                 instances.forEach(inst => {
                     const p = inst.provider.toLowerCase();
+
+                    if (p === "manual") {
+                        const manualStats = document.getElementById("manualQuickTradeStats");
+                        const hasActivity = (inst.win_count + inst.loss_count) > 0 || (inst.active_positions || 0) > 0;
+                        if (manualStats) manualStats.style.display = hasActivity ? "flex" : "none";
+                        const mWr = document.getElementById("manualQuickWinRate");
+                        if (mWr) {
+                            const total = (inst.win_count || 0) + (inst.loss_count || 0);
+                            mWr.innerText = total > 0 ? `${((inst.win_count / total) * 100).toFixed(1)}%` : "—";
+                        }
+                        const mPnl = document.getElementById("manualQuickPnl");
+                        if (mPnl) {
+                            const pnl = inst.total_pnl || 0;
+                            mPnl.innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+                            mPnl.style.color = pnl >= 0 ? "var(--cyber-emerald)" : "var(--hot-pink)";
+                        }
+                        return; // excluded from the 4-model arena KPI totals below
+                    }
+
+                    if (!knownProviders.includes(p)) return;
+                    arenaInstanceIds[p] = inst.id;
+
                     totalAlloc += inst.allocated_budget_usdc || 0;
                     totalPnl += inst.total_pnl || 0;
                     totalWins += inst.win_count || 0;
                     totalLosses += inst.loss_count || 0;
+                    if (inst.has_key) activeModelCount++;
 
                     const allocEl = document.getElementById(`alloc_${p}`);
                     if (allocEl && document.activeElement !== allocEl) {
                         allocEl.value = (inst.allocated_budget_usdc || 10.0).toFixed(1);
+                    }
+
+                    const usedEl = document.getElementById(`used_${p}`);
+                    if (usedEl) {
+                        const alloc = inst.allocated_budget_usdc || 0;
+                        const used = inst.used_budget_usdc || 0;
+                        usedEl.innerText = `$${used.toFixed(2)} / $${alloc.toFixed(2)} used`;
                     }
 
                     const wrEl = document.getElementById(`wr_${p}`);
@@ -3143,7 +3242,7 @@
                         pnlEl.innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
                         pnlEl.style.color = pnl >= 0 ? "var(--cyber-emerald)" : "var(--hot-pink)";
                     }
-                    
+
                     const badgeEl = document.getElementById(`badge_${p}`);
                     if (badgeEl) {
                         if (inst.has_key) {
@@ -3165,6 +3264,12 @@
                 const netPnlEl = document.getElementById("dutchingArenaNetPnl");
                 netPnlEl.innerText = `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`;
                 netPnlEl.style.color = totalPnl >= 0 ? "var(--cyber-emerald)" : "var(--hot-pink)";
+
+                const activeEl = document.getElementById("dutchingActiveModels");
+                if (activeEl) {
+                    activeEl.innerText = `${activeModelCount} Active`;
+                    activeEl.style.color = activeModelCount > 0 ? "var(--cyber-emerald)" : "var(--hot-pink)";
+                }
             } catch (e) {
                 console.error("fetchDutchingArena failed:", e);
             }
@@ -3172,7 +3277,11 @@
 
         async function saveModelAllocation(provider) {
             const valEl = document.getElementById(`alloc_${provider}`);
-            const budget = parseFloat(valEl?.value || 10.0);
+            const budget = parseFloat(valEl?.value);
+            if (isNaN(budget) || budget < 0) {
+                await CustomDialog.alert("Please enter a valid non-negative allocation amount.", "Invalid Amount", "⚠️");
+                return;
+            }
             try {
                 const r = await fetch("/api/dutching/arena/allocate", {
                     method: "POST",
@@ -3180,10 +3289,13 @@
                     body: JSON.stringify({ provider: provider, allocated_budget_usdc: budget })
                 });
                 const res = await r.json();
-                alert(`✅ Allocated $${res.allocated_budget_usdc} USDC to ${provider.toUpperCase()} model instance.`);
+                if (!r.ok) {
+                    await CustomDialog.alert(res.detail || "Unknown error", "Allocation Failed", "❌");
+                    return;
+                }
                 fetchDutchingArena();
             } catch (e) {
-                alert(`❌ Allocation failed: ${e}`);
+                await CustomDialog.alert(String(e), "Allocation Failed", "❌");
             }
         }
 
@@ -3212,13 +3324,18 @@
                 return;
             }
 
+            // A leg's price lives under "market_price" (the scan-time market price used
+            // for slippage/drift comparisons) — NOT "price", which is what the shared
+            // execution pipeline (engine._execute_multi_leg) reads per leg instead.
+            const legSetPrice = (legs) => (legs || []).reduce((acc, l) => acc + (l.market_price ?? l.price ?? 0), 0);
+
             const sortVal = document.getElementById("dutchingSort")?.value || "roi_desc";
             cachedDutchingOpps.sort((a, b) => {
                 const aRoi = a.profit_pct || 0;
                 const bRoi = b.profit_pct || 0;
-                const aCost = a.p_sum || (a.legs || []).reduce((acc, l) => acc + (l.price || 0), 0);
-                const bCost = b.p_sum || (b.legs || []).reduce((acc, l) => acc + (l.price || 0), 0);
-                
+                const aCost = a.p_sum || legSetPrice(a.legs);
+                const bCost = b.p_sum || legSetPrice(b.legs);
+
                 if (sortVal === "roi_desc") return bRoi - aRoi;
                 if (sortVal === "roi_asc") return aRoi - bRoi;
                 if (sortVal === "cost_asc") return aCost - bCost;
@@ -3228,17 +3345,18 @@
             listEl.innerHTML = cachedDutchingOpps.map((opp, idx) => {
                 const legs = opp.legs || [];
                 const topCandidates = opp.top_candidates || legs.map(l => l.outcome);
-                const pSum = opp.p_sum || legs.reduce((acc, l) => acc + (l.price || 0), 0);
+                const pSum = opp.p_sum || legSetPrice(legs);
+                const stakeUsdc = opp.suggested_usdc || 0;
                 const profit = opp.max_profit_usdc || 0;
                 const roiVal = opp.profit_pct || 0;
                 const roiStr = roiVal >= 0 ? `+${roiVal.toFixed(1)}` : roiVal.toFixed(1);
-                
+
                 const profitStr = profit >= 0 ? `$${profit.toFixed(2)}` : `-$${Math.abs(profit).toFixed(2)}`;
                 const profitColor = profit >= 0 ? 'var(--cyber-emerald)' : 'var(--hot-pink)';
-                
+
                 const maxLoss = opp.max_loss_usdc || 0;
                 const maxLossStr = maxLoss < 0 ? `-$${Math.abs(maxLoss).toFixed(2)}` : `$${maxLoss.toFixed(2)}`;
-                
+
                 return `
                     <div style="background: var(--surface); padding: 16px; border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; box-shadow: var(--shadow-sm);">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 12px;">
@@ -3250,7 +3368,8 @@
                         </div>
                         <div style="display:flex; justify-content:space-between; font-size:12px; background:var(--surface-alt); padding:8px 12px; border-radius:8px; margin-bottom:16px;">
                             <span style="display:flex; flex-direction:column; gap:4px;">
-                                <span>Set Cost: <strong>$${(pSum || 0).toFixed(3)}</strong></span>
+                                <span title="Combined market price of the covered set — what you'd pay per $1 of guaranteed payout if it hits">Set Price: <strong>$${(pSum || 0).toFixed(3)}</strong> / $1</span>
+                                <span>Stake: <strong>$${stakeUsdc.toFixed(2)}</strong></span>
                                 <span>Max Loss: <strong style="color:var(--alert-orange);">${maxLossStr}</strong></span>
                             </span>
                             <span style="display:flex; flex-direction:column; gap:4px; align-items:flex-end;">
@@ -3259,7 +3378,7 @@
                         </div>
                         <div style="display:flex; gap:8px;">
                             <button class="btn btn-emerald" style="padding:6px 12px; font-size:11px; flex:1; justify-content: center;" onclick="triggerSideBySideEval(${idx})">🤖 Run Multi-LLM Evaluation</button>
-                            <button class="btn" style="padding:6px 12px; font-size:11px;" onclick="executeQuickDutch(${idx})">⚡ Quick Trade</button>
+                            <button class="btn" style="padding:6px 12px; font-size:11px;" onclick="executeQuickDutch(${idx}, event)">⚡ Quick Trade</button>
                         </div>
                     </div>
                 `;
@@ -3333,9 +3452,10 @@
                                         <span style="color:var(--text-secondary);">Confidence:</span>
                                         <span>${conf}%</span>
                                     </div>
-                                    <div style="font-size:11px; color:var(--text-secondary); background:var(--surface); padding:6px 8px; border-radius:6px; font-style:italic; border:1px solid var(--border);">
+                                    <div style="font-size:11px; color:var(--text-secondary); background:var(--surface); padding:6px 8px; border-radius:6px; font-style:italic; border:1px solid var(--border); margin-bottom:${isFallback ? '0' : '10px'};">
                                         "${escapeHtml(ev.rationale || '')}"
                                     </div>
+                                    ${isFallback ? '' : `<button class="btn btn-emerald" style="width:100%; justify-content:center; padding:6px 10px; font-size:11px;" onclick="tradeProviderRead(${oppIdx}, '${prov}', event)">⚡ Trade This Read</button>`}
                                 </div>
                             `;
                         }).join("")}
@@ -3468,7 +3588,7 @@
         async function submitVaultKey(serviceKey, inputId) {
             const val = document.getElementById(inputId)?.value;
             if (!val) {
-                alert("Please enter a key value first.");
+                await CustomDialog.alert("Please enter a key value first.", "Missing Key", "⚠️");
                 return;
             }
             try {
@@ -3478,14 +3598,73 @@
                     body: JSON.stringify({ service: serviceKey, value: val })
                 });
                 const res = await r.json();
-                alert(`✅ Encrypted ${serviceKey.toUpperCase()} key saved successfully!`);
+                if (!r.ok) {
+                    await CustomDialog.alert(res.detail || "Unknown error", "Save Failed", "❌");
+                    return;
+                }
                 document.getElementById(inputId).value = "";
+                logEvent(`[SYSTEM] Encrypted ${serviceKey.toUpperCase()} key saved to vault.`);
+                fetchDutchingArena(); // has_key / Active Models count should reflect the new key immediately
             } catch (e) {
-                alert(`❌ Failed to save key: ${e}`);
+                await CustomDialog.alert(String(e), "Save Failed", "❌");
             }
         }
 
-        async function executeQuickDutch(oppIdx) {
+        // Shared execution path for both "Quick Trade" (consensus/manual bucket) and
+        // per-provider "Trade This Read" buttons. instanceId === "" attributes the
+        // trade to the mode-scoped manual/consensus arena bucket instead of a specific
+        // model, so its results are still visible (just not attributed to one LLM).
+        async function executeDutchingTrade(opp, instanceId, pTop, pTail, conf, buttonEl) {
+            if (!opp.id) {
+                await CustomDialog.alert(
+                    "This opportunity hasn't been persisted by a scan yet — wait for the next scan cycle and try again.",
+                    "Not Ready", "⏳"
+                );
+                return;
+            }
+
+            const isLive = document.getElementById("modeSwitch")?.checked;
+            if (isLive) {
+                const ok = await CustomDialog.confirm(
+                    `LIVE MODE — this will spend REAL USDC across ${(opp.legs || []).length} legs.\n\nMarket: ${opp.market_title}\nStake: ~$${(opp.suggested_usdc || 0).toFixed(2)}\n\nProceed?`,
+                    'Confirm Live Dutching Trade', '🚨'
+                );
+                if (!ok) return;
+            }
+
+            if (buttonEl) { buttonEl.disabled = true; buttonEl.style.opacity = '0.6'; }
+            try {
+                const r = await fetch("/api/dutching/execute", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        opportunity_id: opp.id,
+                        instance_id: instanceId || "",
+                        p_model_top_set: pTop,
+                        p_tail_risk: pTail,
+                        confidence: conf
+                    })
+                });
+                const res = await r.json();
+                if (!r.ok) {
+                    await CustomDialog.alert(res.detail || 'Unknown error', 'Execution Failed', '❌');
+                    return;
+                }
+                await CustomDialog.alert(
+                    `Executed Dutching trade!\nTrade ID: ${res.trade_id}\nStake: $${res.stake_usdc.toFixed(2)}\nNew Balance: $${res.new_balance.toFixed(2)}`,
+                    'Trade Executed', '⚡'
+                );
+                fetchWalletBalance();
+                fetchDutchingArena();
+                fetchDutchingOpps();
+            } catch (e) {
+                await CustomDialog.alert(String(e), 'Execution Error', '❌');
+            } finally {
+                if (buttonEl) { buttonEl.disabled = false; buttonEl.style.opacity = '1'; }
+            }
+        }
+
+        async function executeQuickDutch(oppIdx, event) {
             const opp = cachedDutchingOpps[oppIdx];
             if (!opp) return;
 
@@ -3514,33 +3693,27 @@
                 }
             }
 
-            if (!opp.id) {
-                alert("❌ This opportunity hasn't been persisted by a scan yet — wait for the next scan cycle and try again.");
+            await executeDutchingTrade(opp, "", avg_p_top, avg_p_tail, avg_conf, event?.target);
+        }
+
+        // "Trade This Read" — attributes the trade to the SPECIFIC provider whose
+        // evaluation card was clicked, using that model's own p_top/p_tail/confidence
+        // (not a blended average), so the arena leaderboard actually reflects which
+        // model's read led to which result.
+        async function tradeProviderRead(oppIdx, provider, event) {
+            const opp = cachedDutchingOpps[oppIdx];
+            if (!opp) return;
+            const ev = window.latestEvals && window.latestEvals[provider];
+            if (!ev) return;
+            const instanceId = arenaInstanceIds[provider];
+            if (!instanceId) {
+                await CustomDialog.alert(
+                    `No arena instance found for ${provider} in the current mode — open the Dutching Arena tab once first so it can seed, then try again.`,
+                    'Not Ready', '⚠️'
+                );
                 return;
             }
-
-            try {
-                const r = await fetch("/api/dutching/execute", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        opportunity_id: opp.id,
-                        instance_id: "inst_manual_1",
-                        p_model_top_set: avg_p_top,
-                        p_tail_risk: avg_p_tail,
-                        confidence: avg_conf
-                    })
-                });
-                const res = await r.json();
-                if (!r.ok) {
-                    alert(`❌ Execution failed: ${res.detail || 'Unknown error'}`);
-                    return;
-                }
-                alert(`⚡ Executed Dutching trade! Trade ID: ${res.trade_id}. New Balance: $${res.new_balance.toFixed(2)}`);
-                fetchWalletBalance();
-            } catch (e) {
-                alert(`Execution error: ${e}`);
-            }
+            await executeDutchingTrade(opp, instanceId, ev.p_model_top_set, ev.p_tail_risk, ev.confidence, event?.target);
         }
 
         // Init

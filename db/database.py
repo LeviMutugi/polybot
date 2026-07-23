@@ -236,6 +236,8 @@ def init_db():
             ("poly_yield_positions", "payoff_type", "TEXT DEFAULT 'directional'"),
             ("poly_yield_opportunities", "payoff_type", "TEXT DEFAULT 'directional'"),
             ("dutching_trades", "position_id", "TEXT"),
+            ("poly_yield_opportunities", "p_sum", "REAL"),
+            ("dutching_arena_instances", "mode", "TEXT DEFAULT 'paper'"),
         ]
         for table_name, col_name, col_type in migration_cols:
             try:
@@ -370,5 +372,54 @@ def init_db():
                 "UPDATE poly_yield_positions SET executed_by = 'bot' WHERE executed_by IS NULL"
             )
             conn.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES ('schema_version', '3')")
+
+        # One-time migration (v4): the arena-allocation endpoint used to INSERT a brand
+        # new instance row on every "Set" click instead of updating the provider's
+        # existing one, so real databases can have several rows per provider. Collapse
+        # each (provider, mode) group into a single row — keep the most recently
+        # updated id (its allocation reflects the latest intended budget), fold the
+        # other rows' usage/win/loss/pnl counters into it so no trade history is lost,
+        # and repoint dutching_trades.instance_id before dropping the duplicates —
+        # then a UNIQUE index on (provider, mode) can be added to prevent recurrence.
+        if current_version < 4:
+            groups = conn.execute(
+                "SELECT provider, mode, GROUP_CONCAT(id) as ids FROM dutching_arena_instances "
+                "GROUP BY provider, mode HAVING COUNT(*) > 1"
+            ).fetchall()
+            for g in groups:
+                dupe_ids = g["ids"].split(",")
+                rows = conn.execute(
+                    "SELECT * FROM dutching_arena_instances WHERE id IN (%s) ORDER BY updated_at DESC" %
+                    ",".join("?" * len(dupe_ids)), dupe_ids
+                ).fetchall()
+                keep = rows[0]
+                drop_ids = [r["id"] for r in rows[1:]]
+                used = sum(r["used_budget_usdc"] or 0 for r in rows)
+                active = sum(r["active_positions"] or 0 for r in rows)
+                wins = sum(r["win_count"] or 0 for r in rows)
+                losses = sum(r["loss_count"] or 0 for r in rows)
+                pnl = sum(r["total_pnl"] or 0 for r in rows)
+                conn.execute(
+                    "UPDATE dutching_arena_instances SET used_budget_usdc = ?, active_positions = ?, "
+                    "win_count = ?, loss_count = ?, total_pnl = ? WHERE id = ?",
+                    [used, active, wins, losses, pnl, keep["id"]]
+                )
+                if drop_ids:
+                    placeholders = ",".join("?" * len(drop_ids))
+                    conn.execute(
+                        f"UPDATE dutching_trades SET instance_id = ? WHERE instance_id IN ({placeholders})",
+                        [keep["id"]] + drop_ids
+                    )
+                    conn.execute(f"DELETE FROM dutching_arena_instances WHERE id IN ({placeholders})", drop_ids)
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_dutching_arena_provider_mode "
+                "ON dutching_arena_instances(provider, mode)"
+            )
+            conn.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES ('schema_version', '4')")
+        else:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_dutching_arena_provider_mode "
+                "ON dutching_arena_instances(provider, mode)"
+            )
 
         conn.commit()

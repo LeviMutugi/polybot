@@ -488,71 +488,81 @@ class DutchingEvaluateArgs(BaseModel):
 
 class DutchingExecuteArgs(BaseModel):
     opportunity_id: str
-    instance_id: str = "inst_manual_1"
+    instance_id: str = ""  # empty = attribute to the mode-scoped manual/consensus instance
     p_model_top_set: float = 0.90
     p_tail_risk: float = 0.10
     confidence: float = 0.80
 
+_DUTCHING_DEFAULT_MODELS = {
+    "openai": "gpt-4o",
+    "anthropic": "claude-3-5-sonnet-20241022",
+    "kimi": "moonshot-v1-8k",
+    "deepseek": "deepseek-chat"
+}
+
 @app.get("/api/dutching/arena")
 async def get_dutching_arena():
-    """Get active multi-LLM model allocations & leaderboard statistics."""
+    """Get active multi-LLM model allocations & leaderboard statistics, scoped to
+    whichever mode (paper/live) the dashboard is currently in — paper and live
+    budgets/results never blend together."""
+    mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
     conn = get_sqlite()
     with _sqlite_lock:
         rows = conn.execute(
-            "SELECT * FROM dutching_arena_instances ORDER BY total_pnl DESC, created_at ASC"
+            "SELECT * FROM dutching_arena_instances WHERE mode = ? ORDER BY total_pnl DESC, created_at ASC",
+            [mode]
         ).fetchall()
         if not rows:
-            defaults = [
-                ("inst_openai", "openai", "gpt-4o", 10.0),
-                ("inst_anthropic", "anthropic", "claude-3-5-sonnet-20241022", 10.0),
-                ("inst_kimi", "kimi", "moonshot-v1-8k", 10.0),
-                ("inst_deepseek", "deepseek", "deepseek-chat", 10.0)
-            ]
-            for i_id, prov, model, budget in defaults:
+            for prov, model in _DUTCHING_DEFAULT_MODELS.items():
                 conn.execute(
-                    "INSERT OR IGNORE INTO dutching_arena_instances (id, provider, model_name, allocated_budget_usdc) VALUES (?, ?, ?, ?)",
-                    [i_id, prov, model, budget]
+                    """INSERT OR IGNORE INTO dutching_arena_instances
+                       (id, provider, model_name, allocated_budget_usdc, mode)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    [f"inst_{prov}_{mode}", prov, model, 10.0, mode]
                 )
             conn.commit()
             rows = conn.execute(
-                "SELECT * FROM dutching_arena_instances ORDER BY total_pnl DESC, created_at ASC"
+                "SELECT * FROM dutching_arena_instances WHERE mode = ? ORDER BY total_pnl DESC, created_at ASC",
+                [mode]
             ).fetchall()
     results = []
     for r in rows:
         d = dict(r)
         prov = d["provider"].lower()
-        # keystore might store keys under the exact provider name (e.g. 'openai') 
+        # keystore might store keys under the exact provider name (e.g. 'openai')
         # or provider-specific suffixes. The JS uses keys like 'openai', 'anthropic', etc.
-        d["has_key"] = bool(keystore.get_decrypted(prov))
+        d["has_key"] = bool(keystore.get_decrypted(prov)) if prov in _DUTCHING_DEFAULT_MODELS else None
         results.append(d)
-        
-    return results
+
+    return {"mode": mode, "instances": results}
 
 @app.post("/api/dutching/arena/allocate")
 async def allocate_dutching_instance(args: DutchingAllocateArgs, _=Depends(verify_token)):
-    """Allocate a dedicated USDC wallet balance to an LLM provider instance."""
+    """Allocate a dedicated USDC budget to an LLM provider instance for the CURRENT
+    mode. Upserts by (provider, mode) — repeated 'Set' clicks update the same row
+    instead of minting a new orphaned instance every time."""
     if args.allocated_budget_usdc < 0:
         raise HTTPException(status_code=400, detail="Allocation budget must be non-negative")
-    
+
+    mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
+    provider = args.provider.lower()
     conn = get_sqlite()
-    instance_id = f"inst_{args.provider.lower()}_{uuid.uuid4().hex[:6]}"
-    default_models = {
-        "openai": "gpt-4o",
-        "anthropic": "claude-3-5-sonnet-20241022",
-        "kimi": "moonshot-v1-8k",
-        "deepseek": "deepseek-chat"
-    }
-    model_name = args.model_name or default_models.get(args.provider.lower(), "custom-model")
-    
+    instance_id = f"inst_{provider}_{mode}"
+    model_name = args.model_name or _DUTCHING_DEFAULT_MODELS.get(provider, "custom-model")
+
     with _sqlite_lock:
         conn.execute(
-            """INSERT OR REPLACE INTO dutching_arena_instances
-               (id, provider, model_name, allocated_budget_usdc, updated_at)
-               VALUES (?, ?, ?, ?, datetime('now'))""",
-            [instance_id, args.provider.lower(), model_name, args.allocated_budget_usdc]
+            """INSERT INTO dutching_arena_instances
+               (id, provider, model_name, allocated_budget_usdc, mode, updated_at)
+               VALUES (?, ?, ?, ?, ?, datetime('now'))
+               ON CONFLICT(provider, mode) DO UPDATE SET
+                 model_name = excluded.model_name,
+                 allocated_budget_usdc = excluded.allocated_budget_usdc,
+                 updated_at = datetime('now')""",
+            [instance_id, provider, model_name, args.allocated_budget_usdc, mode]
         )
         conn.commit()
-    return {"id": instance_id, "provider": args.provider, "allocated_budget_usdc": args.allocated_budget_usdc}
+    return {"id": instance_id, "provider": provider, "mode": mode, "allocated_budget_usdc": args.allocated_budget_usdc}
 
 @app.post("/api/dutching/evaluate")
 async def evaluate_dutching_market(args: DutchingEvaluateArgs, _=Depends(verify_token)):
@@ -607,12 +617,25 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
     the trade's cost, PnL, and settlement.
     """
     conn = get_sqlite()
+    mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
+
+    # Resolve the arena instance being traded against: an explicit provider instance
+    # from a "Trade This Read" click, or the mode-scoped manual/consensus bucket for
+    # a plain Quick Trade. Deterministic ids (not random) so repeated trades always
+    # attribute to the SAME row instead of scattering across orphaned instances.
+    is_manual_bucket = not args.instance_id.strip()
+    instance_id = args.instance_id.strip() if not is_manual_bucket else f"inst_manual_{mode}"
     with _sqlite_lock:
         row = conn.execute(
             "SELECT * FROM poly_yield_opportunities WHERE id = ?", [args.opportunity_id]
         ).fetchone()
+        inst_row = conn.execute(
+            "SELECT * FROM dutching_arena_instances WHERE id = ?", [instance_id]
+        ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Opportunity not found")
+    if not inst_row and not is_manual_bucket:
+        raise HTTPException(status_code=404, detail=f"Unknown arena instance: {instance_id}")
 
     opp = dict(row)
     if opp.get("strategy") != "s20_dutching":
@@ -622,6 +645,22 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
     if opp.get("instructions"):
         opp["instructions"] = json.loads(opp["instructions"])
 
+    # Enforce the per-model allocation as an actual spending cap, not just a display
+    # number. Checked against the scanned suggested_usdc — Kelly/drawdown sizing inside
+    # execute_opportunity() can only shrink the final stake from here, never grow it,
+    # so this can't be bypassed by the allocator resizing the trade afterwards.
+    if inst_row:
+        allocated = float(inst_row["allocated_budget_usdc"] or 0.0)
+        used = float(inst_row["used_budget_usdc"] or 0.0)
+        remaining = allocated - used
+        estimated_stake = float(opp.get("suggested_usdc") or 0.0)
+        if estimated_stake > remaining:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Allocation exceeded: {instance_id} has ${remaining:.2f} of ${allocated:.2f} "
+                       f"remaining ({mode} mode), this trade needs up to ${estimated_stake:.2f}."
+            )
+
     result = await poly_yield_engine.execute_opportunity(opp, triggered_by="manual")
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Execution failed"))
@@ -629,7 +668,6 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
     position_id = result.get("position_id")
     stake_usdc = float(result.get("cost_usdc") or opp.get("suggested_usdc") or 0.0)
     legs = opp.get("legs") or []
-    mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
     trade_id = f"dutch_tx_{uuid.uuid4().hex[:8]}"
     sum_market_price = sum(float(l.get("market_price", l.get("price", 0))) for l in legs)
     sum_fill_price = sum(float(l.get("fill_price", l.get("price", 0))) for l in legs)
@@ -641,23 +679,24 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
                 sum_fill_price, p_model_top_set, p_tail_risk, confidence, stake_usdc, legs_json, mode, position_id)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                trade_id, args.instance_id, opp.get("market_id"), opp.get("market_title"),
+                trade_id, instance_id, opp.get("market_id"), opp.get("market_title"),
                 json.dumps([l.get("outcome") for l in legs]),
                 sum_market_price, sum_fill_price, args.p_model_top_set,
                 args.p_tail_risk, args.confidence, stake_usdc,
                 json.dumps(legs), mode, position_id
             ]
         )
-        # Ensure the arena instance row exists (e.g. the "Quick Trade" button targets
-        # inst_manual_1, which is never created by the arena leaderboard seeding path)
-        # so the budget/position update below isn't silently dropped.
+        # Ensure the arena instance row exists — the manual/consensus bucket is never
+        # created by the arena leaderboard seeding path — so the update below isn't
+        # silently dropped. provider='manual' keeps it out of the has_key/per-model
+        # leaderboard math while still being visible in the arena instance list.
         conn.execute(
-            "INSERT OR IGNORE INTO dutching_arena_instances (id, provider, model_name) VALUES (?, ?, ?)",
-            [args.instance_id, args.instance_id, "manual"]
+            "INSERT OR IGNORE INTO dutching_arena_instances (id, provider, model_name, mode) VALUES (?, ?, ?, ?)",
+            [instance_id, "manual", "Manual / Consensus", mode]
         )
         conn.execute(
             "UPDATE dutching_arena_instances SET used_budget_usdc = used_budget_usdc + ?, active_positions = active_positions + 1 WHERE id = ?",
-            [stake_usdc, args.instance_id]
+            [stake_usdc, instance_id]
         )
         conn.commit()
 
@@ -667,6 +706,7 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
         "trade_id": trade_id,
         "position_id": position_id,
         "mode": mode,
+        "instance_id": instance_id,
         "stake_usdc": stake_usdc,
         "new_balance": new_balance
     }
