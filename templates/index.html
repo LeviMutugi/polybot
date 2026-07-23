@@ -1904,14 +1904,25 @@
                     sizeText += ` <br><span style="font-size:10px; color:var(--text-secondary);">(${pct}%)</span>`;
                 }
                 const isManual = opp.exec_mode === 'manual';
+                // fillable defaults true (INTEGER DEFAULT 1 in the DB) — a strategy only
+                // sets it to 0 when it deliberately still surfaces an opportunity it
+                // already knows failed the live-book fillability check (e.g. S20
+                // Dutching, for visibility), rather than silently skipping it like most
+                // strategies do.
+                const isUnfillable = opp.fillable === 0 || opp.fillable === false;
+                const unfillableTag = isUnfillable
+                    ? `<br><span class="badge" style="background:var(--warning-bg,rgba(255,140,0,0.15)); color:var(--alert-orange); font-size:10px; margin-top:4px; display:inline-block;" title="${escapeHtml(opp.unfillable_reason || 'One or more legs failed the live order-book fillability check at scan time.')}">⚠️ Unfillable</span>`
+                    : '';
                 // NOTE: all interactive handlers are index-based lookups into renderedOpps —
                 // inlining titles/ids into onclick attributes breaks on quotes/apostrophes.
-                const execBtn = isManual
+                const execBtn = isUnfillable
+                    ? `<button class="btn" disabled title="${escapeHtml(opp.unfillable_reason || 'Not fillable at scan time — liquidity or slippage failed the pre-flight check.')}" style="padding:6px 12px; font-size:11px; opacity:0.45; cursor:not-allowed;">Unfillable</button>`
+                    : isManual
                     ? `<button class="btn" disabled title="This strategy is in MANUAL mode: follow the instructions, or switch it to semi/auto in the Bot Strategy Manager." style="padding:6px 12px; font-size:11px; opacity:0.45; cursor:not-allowed;">Manual Only</button>`
                     : `<button class="btn btn-emerald" id="exec_${idx}" onclick="executeTradeByIdx(${idx}, event)" style="padding:6px 12px; font-size:11px;">Execute</button>`;
                 return `
                     <tr onclick="toggleOppDetailsByIdx(${idx})" style="cursor:pointer;">
-                        <td><span class="badge ${getRiskBadge(opp.risk_level)}">${formatStrategyName(opp.strategy)}</span></td>
+                        <td><span class="badge ${getRiskBadge(opp.risk_level)}">${formatStrategyName(opp.strategy)}</span>${unfillableTag}</td>
                         <td style="max-width:300px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(opp.market_title || '')}">${escapeHtml(opp.market_title || '')}</td>
                         <td><span style="color:var(--cyber-emerald); font-weight:600;">${escapeHtml(opp.outcome || '')}</span></td>
                         <td>${opp.implied_prob != null ? opp.implied_prob + '%' : 'N/A'}</td>
@@ -3469,11 +3480,24 @@
                 const maxLoss = opp.max_loss_usdc || 0;
                 const maxLossStr = maxLoss < 0 ? `-$${Math.abs(maxLoss).toFixed(2)}` : `$${maxLoss.toFixed(2)}`;
 
+                // fillable defaults true — only set to false when a leg already failed the
+                // live-book fillability check at scan time (see opp.unfillable_reason).
+                const isUnfillable = opp.fillable === 0 || opp.fillable === false;
+                const unfillableBadge = isUnfillable
+                    ? `<span class="badge" style="background:var(--warning-bg,rgba(255,140,0,0.15)); color:var(--alert-orange); white-space:nowrap; margin-left:8px;" title="${escapeHtml(opp.unfillable_reason || 'One or more legs failed the live order-book fillability check.')}">⚠️ Unfillable</span>`
+                    : '';
+                const quickTradeBtn = isUnfillable
+                    ? `<button class="btn" disabled title="${escapeHtml(opp.unfillable_reason || 'Not fillable at scan time.')}" style="padding:6px 12px; font-size:11px; opacity:0.45; cursor:not-allowed;">Unfillable</button>`
+                    : `<button class="btn" style="padding:6px 12px; font-size:11px;" onclick="executeQuickDutch(${idx}, event)">⚡ Quick Trade</button>`;
+
                 return `
                     <div style="background: var(--surface); padding: 16px; border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; box-shadow: var(--shadow-sm);">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 12px;">
                             <span style="font-weight:700; font-family:'Space Grotesk', sans-serif; font-size:14px; line-height: 1.3;">${escapeHtml(opp.market_title)}</span>
-                            <span class="badge badge-low" style="white-space: nowrap; margin-left: 8px;">${roiStr}% ROI</span>
+                            <span style="display:flex; align-items:center; white-space:nowrap; margin-left: 8px;">
+                                <span class="badge badge-low" style="white-space: nowrap;">${roiStr}% ROI</span>
+                                ${unfillableBadge}
+                            </span>
                         </div>
                         <div style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; flex-grow: 1;">
                             Top Candidates: <strong style="color:var(--text-primary);">${escapeHtml(topCandidates.join(", "))}</strong>
@@ -3490,7 +3514,7 @@
                         </div>
                         <div style="display:flex; gap:8px;">
                             <button class="btn btn-emerald" style="padding:6px 12px; font-size:11px; flex:1; justify-content: center;" onclick="triggerSideBySideEval(${idx})">🤖 Run Multi-LLM Evaluation</button>
-                            <button class="btn" style="padding:6px 12px; font-size:11px;" onclick="executeQuickDutch(${idx}, event)">⚡ Quick Trade</button>
+                            ${quickTradeBtn}
                         </div>
                     </div>
                 `;

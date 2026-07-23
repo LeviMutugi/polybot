@@ -2,6 +2,7 @@
 Base Strategy Interface & Utilities
 Provides the BaseStrategy class and shared utility functions (VWAP order book walking, date parsing).
 """
+import asyncio
 import json
 import logging
 import time
@@ -78,6 +79,66 @@ def get_market_url(market: dict) -> str:
     if not slug:
         return f"{base}/market/{market.get('id', '')}"
     return f"{base}/market/{slug}"
+
+async def fetch_all_paginated(
+    http_client: httpx.AsyncClient,
+    url: str,
+    params: dict,
+    page_size: int = 500,
+    max_pages: Optional[int] = None,
+    delay_s: float = 0.2,
+) -> list:
+    """
+    Fetch every item from a paginated Gamma-style list endpoint (offset/limit
+    pagination), looping until a short page signals the end. Used so every
+    strategy scans the full active market/event catalog instead of a single
+    capped page — this bot has no visibility into Polymarket's exact published
+    rate limit, so a small delay between page requests (and a single backoff
+    retry on an explicit 429) keeps this well within reasonable bounds without
+    needing to know the precise number.
+
+    Never raises: a failed or rate-limited page request stops pagination and
+    returns whatever was already gathered from prior pages, so a transient
+    hiccup costs freshness on the remainder of one scan rather than aborting
+    the whole scan.
+    """
+    all_items: list = []
+    offset = 0
+    pages = 0
+    while True:
+        page_params = {**params, "limit": page_size, "offset": offset}
+        try:
+            r = await http_client.get(url, params=page_params)
+            if r.status_code == 429:
+                await asyncio.sleep(max(1.0, delay_s * 5))
+                r = await http_client.get(url, params=page_params)
+            if r.status_code != 200:
+                _log.warning(
+                    "fetch_all_paginated: %s returned %s at offset %d, stopping with %d items so far",
+                    url, r.status_code, offset, len(all_items)
+                )
+                break
+            page = r.json()
+        except Exception as e:
+            _log.warning(
+                "fetch_all_paginated: request to %s failed at offset %d (%s), stopping with %d items so far",
+                url, offset, e, len(all_items)
+            )
+            break
+
+        if not page:
+            break
+        all_items.extend(page)
+        pages += 1
+        if len(page) < page_size:
+            break  # short page — this was the last one
+        if max_pages and pages >= max_pages:
+            break
+        offset += page_size
+        if delay_s > 0:
+            await asyncio.sleep(delay_s)
+    return all_items
+
 
 def sort_book_levels(levels: list, side: str) -> list:
     """

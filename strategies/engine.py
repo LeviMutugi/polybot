@@ -158,17 +158,8 @@ class PolyYieldEngine:
         except Exception as ex:
             _log.error("Failed to mark stale opportunities: %s", ex)
 
-        # Filter for auto-execution and rank by priority metric
-        # EV = (Return / Risk) * Prob of Success. We use expected_value_usdc or annualized_apy as proxy
-        auto_opps = [opp for opp in all_opps if opp.get("exec_mode") == "auto" and not self._killswitch]
+        auto_opps = self._select_auto_opportunities(all_opps, self._killswitch)
 
-        # Sort opportunities (descending) prioritizing expected value or APY if EV not available
-        auto_opps.sort(key=lambda x: (
-            (x.get("expected_value_usdc") or 0) > 0, # Has positive EV calculation
-            (x.get("expected_value_usdc") or 0),     # The EV amount itself
-            (x.get("annualized_apy") or 0)           # Fallback to APY
-        ), reverse=True)
-        
         # Execute top-down
         for opp in auto_opps:
             if self._killswitch:
@@ -182,20 +173,44 @@ class PolyYieldEngine:
         await self._broadcast({"type": "scan_complete", "scan_count": self._scan_count, "opps_found": len(all_opps)})
         print(f"[PolyYieldEngine] Scan #{self._scan_count} finished. {len(all_opps)} opportunities found.")
 
-    async def _fetch_markets(self, limit: int = 500) -> list:
+    @staticmethod
+    def _select_auto_opportunities(all_opps: list, killswitch: bool) -> list:
+        """Opportunities eligible for the auto-scan loop to execute this cycle, ranked
+        by priority (EV = Return/Risk * Prob of Success; we use expected_value_usdc or
+        annualized_apy as a proxy).
+
+        fillable defaults True since most strategies simply skip a leg that fails the
+        live-book fillability check rather than surfacing it at all; a strategy that
+        deliberately still surfaces an opportunity it already knows is currently
+        unfillable (e.g. S20 Dutching, for UI visibility) sets fillable=False, and the
+        auto loop must never repeatedly attempt — and fail — an execution already
+        known bad every single scan.
+        """
+        auto_opps = [
+            opp for opp in all_opps
+            if opp.get("exec_mode") == "auto" and not killswitch and opp.get("fillable", True)
+        ]
+        auto_opps.sort(key=lambda x: (
+            (x.get("expected_value_usdc") or 0) > 0, # Has positive EV calculation
+            (x.get("expected_value_usdc") or 0),     # The EV amount itself
+            (x.get("annualized_apy") or 0)           # Fallback to APY
+        ), reverse=True)
+        return auto_opps
+
+    async def _fetch_markets(self) -> list:
+        """Fetch every active, unclosed market from Gamma — every strategy scans
+        the FULL catalog, not just a capped top-N-by-liquidity page, so nothing
+        buried deeper in the market list is silently invisible to every bot."""
         try:
-            # Load current network chain ID
-            chain_id = await cfg.get_typed("polygon_chain_id", int, settings.polygon_chain_id)
-            # Use Gamma API params
-            r = await self._http.get(f"{GAMMA_URL}/markets", params={
-                "limit": limit,
-                "active": "true",
-                "closed": "false",
-                "order": "liquidity",
-                "ascending": "false",
-            })
-            if r.status_code == 200:
-                return r.json()
+            page_size = await cfg.get_typed("poly_yield.market_fetch_page_size", int, 500)
+            max_pages = await cfg.get_typed("poly_yield.market_fetch_max_pages", int, 0)
+            delay_s = await cfg.get_typed("poly_yield.market_fetch_delay_s", float, 0.2)
+            from strategies.base import fetch_all_paginated
+            return await fetch_all_paginated(
+                self._http, f"{GAMMA_URL}/markets",
+                {"active": "true", "closed": "false", "order": "liquidity", "ascending": "false"},
+                page_size=page_size, max_pages=(max_pages or None), delay_s=delay_s,
+            )
         except Exception as e:
             _log.error("Error fetching markets from Gamma: %s", e)
         return []
@@ -295,8 +310,8 @@ class PolyYieldEngine:
                      slippage_bps, market_id, market_title, market_url, token_id, outcome, entry_price,
                      implied_prob, yes_price, no_price, annualized_apy, profit_pct, days_to_expiry,
                      action, exec_mode, suggested_usdc, status, notes, instructions, legs,
-                     max_profit_usdc, max_loss_usdc, payoff_type, p_sum, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                     max_profit_usdc, max_loss_usdc, payoff_type, p_sum, fillable, unfillable_reason, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
                 """, [
                     opp.get("id"), opp.get("strategy"), opp.get("risk_level"), opp.get("exec_mode"),
                     opp.get("market_type", "Binary"), opp.get("reward_score", 0.0), opp.get("slippage_bps", 0.0),
@@ -308,7 +323,7 @@ class PolyYieldEngine:
                     opp.get("status", "open"), opp.get("notes"),
                     json.dumps(opp.get("instructions")), json.dumps(opp.get("legs")),
                     opp.get("max_profit_usdc"), opp.get("max_loss_usdc"), opp.get("payoff_type", "directional"),
-                    opp.get("p_sum")
+                    opp.get("p_sum"), 1 if opp.get("fillable", True) else 0, opp.get("unfillable_reason")
                 ])
                 conn.commit()
             await self._broadcast({"type": "opportunity_update", "data": opp})

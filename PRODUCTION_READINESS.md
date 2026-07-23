@@ -123,12 +123,14 @@ wallet private key. Both are now untracked and ignored.
 
 ## 4. Test coverage
 
-`tests/` now has **80 passing tests**. Beyond the original regression tests (book
+`tests/` now has **89 passing tests**. Beyond the original regression tests (book
 normalization, VWAP walking, fillability guard, APY bounds, Kelly unit sanitization,
 allocation caps, staleness rejection/marking, manual-mode rejection, definitive-winner
 settlement, full paper-trade wallet conservation, and exit price validation), there
-are now 19 tests covering every S9-S19 strategy's core logic plus the S5/S3 fixes
-(`tests/test_new_strategies.py`).
+are 19 tests covering every S9-S19 strategy's core logic plus the S5/S3 fixes
+(`tests/test_new_strategies.py`), and 9 more covering full-catalog pagination,
+S20's unfillable-leg flagging, and the engine's auto-exec eligibility filter
+(`tests/test_market_coverage_and_safety.py`).
 
 **Test harness fix:** `pytest-asyncio` was never declared anywhere (not in
 `requirements.txt`, no `pytest.ini`/`conftest.py` setting `asyncio_mode`), so every
@@ -185,7 +187,53 @@ honest specifics of what data it uses and what it doesn't:
   line ran — which the new second pass did — would hit `UnboundLocalError`.
   Hoisted both to the top of the function.
 
-## 6. What still remains (honest assessment)
+## 6. Full-catalog scanning, S20 Dutching accuracy, and auto-mode safety (this pass)
+
+Triggered by an external code review of S20 Dutching that found a misleading
+docstring, a UI-spam risk in auto mode, and an artificial scan cap. All three are
+fixed, and the fixes generalize to every strategy, not just Dutching:
+
+- **S20's docstring falsely claimed** it uses "LLM-based sentiment / tail-risk
+  modeling to discount stake size" — it doesn't; sizing is a fixed fraction of
+  wallet balance split proportionally per leg. Rewritten to describe what's
+  actually there, and to note that per-market LLM tail-risk evaluation already
+  exists as a separate, human-triggered tool (Dutching Bot Arena's
+  "Run Multi-LLM Evaluation" / `/api/dutching/evaluate`) — wiring that same
+  evaluation into S20's own automatic scan/sizing loop is a planned addition,
+  not present today.
+- **Unfillable-opportunity spam in auto mode.** S20 deliberately still surfaces
+  an opportunity even when a leg fails the live order-book fillability check
+  ("we still want to show the market" — reasonable for visibility), but nothing
+  distinguished that state, so if S20 were switched to `auto` the engine would
+  re-attempt — and fail — that same execution every single scan, spamming logs.
+  Fixed with a `fillable` / `unfillable_reason` field on the opportunity (DB
+  migration on `poly_yield_opportunities`): the UI now shows a clear "⚠️
+  Unfillable" badge and disables the Execute/Quick-Trade button with the reason
+  as a tooltip, and the engine's auto-exec eligibility filter
+  (`PolyYieldEngine._select_auto_opportunities`) now excludes `fillable=False`
+  rows outright — the auto loop never even attempts an execution already known
+  bad. `fillable` defaults `True` and every other strategy is unaffected (they
+  already just skip an unfillable leg rather than surfacing it).
+- **Every strategy was scanning a capped subset of the market**, not the whole
+  thing: `PolyYieldEngine._fetch_markets` capped Gamma `/markets` at a single
+  500-item page (ordered by liquidity — so anything past the top 500 by
+  liquidity was invisible to every strategy), and S20 separately capped Gamma
+  `/events` at a single 100-item page. Added `strategies.base.fetch_all_paginated`
+  — a shared offset/limit pagination helper with a small delay between page
+  requests (a self-imposed courtesy since Polymarket's exact rate limit isn't
+  published/knowable from here) and a single backoff-retry on an explicit 429 —
+  and switched both call sites to it. Page size, max-page safety valve, and
+  inter-page delay are all configurable
+  (`poly_yield.market_fetch_*`, `s20_dutching.event_fetch_*`) with defaults that
+  preserve today's page sizes (500 / 100) while removing the *cap* on total
+  pages fetched. A failed/rate-limited page stops pagination gracefully and
+  keeps whatever was already gathered, rather than losing the whole scan.
+  Scans will take longer wall-clock time than before (proportional to how many
+  markets/events actually exist) — if that starts to bump up against
+  `poly_yield.scan_interval_s`, raise the interval before shrinking page
+  coverage back down.
+
+## 7. What still remains (honest assessment)
 
 These are **not** hidden logic bugs — they are the risks you said you accept, plus
 known limitations that fail safe (produce nothing rather than something wrong):
@@ -215,7 +263,7 @@ known limitations that fail safe (produce nothing rather than something wrong):
 6. **Single-process SQLite + in-memory market locks** — correct for one bot instance.
    Do **not** run two instances against the same database.
 
-## 7. Go-live checklist (recommended order)
+## 8. Go-live checklist (recommended order)
 
 1. **Generate a fresh wallet** (the old key material was in git — see §1.8). Fund
    with USDC + a few POL for gas. Store the key via the UI (never in git/env files).

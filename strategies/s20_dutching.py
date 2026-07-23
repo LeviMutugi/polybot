@@ -1,14 +1,22 @@
 """
-Strategy S20: Top-N Dutching Strategy with Tail-Risk Kelly Sizing
-Description: Spreads stakes across the top N favorites in a multi-outcome market to secure uniform payouts if any selected candidate wins.
-Uses LLM-based sentiment / tail-risk modeling to discount stake size when outside longshots pose non-trivial risk.
+Strategy S20: Top-N Dutching Strategy
+Description: Spreads stakes across the top N favorites in a multi-outcome market to
+secure a uniform payout if any one of the selected candidates wins. Sizing is
+currently a fixed fraction of wallet balance (poly_yield.max_position_pct) split
+proportionally to each leg's price — there is no sentiment/tail-risk model discounting
+stake size today. Per-market LLM-based tail-risk evaluation already exists as an
+opt-in, human-triggered tool via the Dutching Bot Arena UI/API
+(services/llm_provider.py, /api/dutching/evaluate) for a trader to review before
+manually sizing a trade; wiring that same evaluation into this strategy's own
+automatic scan/sizing loop is a planned future addition, not present yet.
 """
 import uuid
 import logging
 from typing import List, Dict, Optional
 import httpx
 
-from strategies.base import BaseStrategy, parse_list, days_to_expiry, get_market_url, calculate_execution_price
+from strategies.base import BaseStrategy, parse_list, days_to_expiry, get_market_url, calculate_execution_price, fetch_all_paginated
+from config import settings
 from db.config import cfg
 from services.gas_tracker import gas_tracker
 
@@ -37,14 +45,22 @@ class DutchingStrategy(BaseStrategy):
         exec_mode = await cfg.get_typed("s20_dutching.exec_mode", str, self.default_exec_mode)
 
         opps = []
-        
+
         # Override S20 to fetch Gamma events instead of using the raw markets from engine,
-        # because Polymarket multi-outcome markets are now represented as 'events' with multiple 'markets'
+        # because Polymarket multi-outcome markets are now represented as 'events' with
+        # multiple 'markets'. Paginated across the FULL active event catalog (not just a
+        # single capped page) so a multi-outcome event buried deeper in the list isn't
+        # silently invisible to this strategy.
         try:
-            r = await http_client.get("https://gamma-api.polymarket.com/events", params={
-                "limit": 100, "active": "true", "closed": "false"
-            })
-            events = r.json()
+            page_size = await cfg.get_typed("s20_dutching.event_fetch_page_size", int, 100)
+            max_pages = await cfg.get_typed("s20_dutching.event_fetch_max_pages", int, 0)
+            delay_s = await cfg.get_typed("s20_dutching.event_fetch_delay_s", float, 0.2)
+            gamma_url = settings.polymarket_gamma_url.rstrip("/")
+            events = await fetch_all_paginated(
+                http_client, f"{gamma_url}/events",
+                {"active": "true", "closed": "false"},
+                page_size=page_size, max_pages=(max_pages or None), delay_s=delay_s,
+            )
         except Exception as e:
             _log.error(f"S20 failed to fetch events: {e}")
             events = []
@@ -121,7 +137,7 @@ class DutchingStrategy(BaseStrategy):
 
                 from strategies.base import is_fillable
 
-                leg_failed = False
+                unfillable_reasons = []
                 for leg in top_set:
                     leg_target_usdc = target_set_shares * leg["price"]
                     exec_data = await calculate_execution_price(
@@ -129,12 +145,18 @@ class DutchingStrategy(BaseStrategy):
                     )
 
                     if not is_fillable(exec_data, max_slippage):
-                        # For UI, if it's not fillable due to slippage, we still want to show the market!
-                        # We'll just use the best available price.
-                        fill_price = exec_data.get("price", leg["price"])
+                        # Still surface the opportunity for visibility (using the best
+                        # available price) rather than hiding it entirely, but record WHY
+                        # it isn't fillable — the opportunity gets tagged fillable=False
+                        # below, so the UI shows an "Unfillable" badge and the engine's
+                        # auto-exec loop skips it instead of repeatedly attempting (and
+                        # failing) an execution already known bad every single scan.
+                        fill_price = exec_data.get("price") or leg["price"]
+                        reason = exec_data.get("error") or exec_data.get("warning") or f"slippage above {max_slippage}% tolerance"
+                        unfillable_reasons.append(f"{leg['name']}: {reason}")
                     else:
                         fill_price = exec_data["price"]
-                        
+
                     leg_shares = leg_target_usdc / fill_price if fill_price > 0 else 0
                     actual_leg_cost = fill_price * leg_shares
 
@@ -187,6 +209,8 @@ class DutchingStrategy(BaseStrategy):
                     "entry_price": p_sum,
                     "exec_mode": exec_mode,
                     "p_sum": round(p_sum, 4),
+                    "fillable": not unfillable_reasons,
+                    "unfillable_reason": "; ".join(unfillable_reasons) if unfillable_reasons else None,
                     "suggested_usdc": round(actual_total_cost, 2),
                     "profit_pct": round(actual_roi_pct, 2),
                     "payoff_type": self.payoff_type,
