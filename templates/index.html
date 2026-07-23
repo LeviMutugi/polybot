@@ -2198,13 +2198,14 @@
                     fetchStats();
                     fetchWalletBalance();
                 } else {
-                    logEvent(`[ENGINE] Execution DENIED: ${res.detail || res.error || "Error"}`);
+                    const reason = formatApiError(res.detail || res.error);
+                    await logError(`[ENGINE] Execution DENIED: ${reason}`, "Execution Denied", reason);
                     if (btn) { btn.innerText = 'Failed'; btn.style.background = 'var(--hot-pink)'; }
                     // Denials usually mean stale/moved prices — refresh the table
                     debouncedFetchOpportunities();
                 }
             } catch (e) {
-                logEvent(`[ENGINE] Execution failure: ${e}`);
+                await logError(`[ENGINE] Execution failure: ${e}`, "Execution Error", String(e));
                 if (btn) { btn.innerText = 'Error'; btn.style.background = 'var(--hot-pink)'; }
             }
             // Re-enable after 3 seconds
@@ -2389,10 +2390,12 @@
                     logEvent(`[SYSTEM] Encrypted key for ${service} stored successfully.`);
                     closeKeyModal();
                 } else {
-                    logEvent(`[SYSTEM] Key storage failed.`);
+                    const res = await r.json().catch(() => ({}));
+                    const reason = formatApiError(res.detail);
+                    await logError(`[SYSTEM] Key storage failed: ${reason}`, "Key Storage Failed", reason);
                 }
             } catch (e) {
-                console.error(e);
+                await logError(`[SYSTEM] Key storage failure: ${e}`, "Key Storage Error", String(e));
             }
         }
 
@@ -2408,6 +2411,35 @@
                 panel.removeChild(panel.firstChild);
             }
             panel.scrollTop = panel.scrollHeight;
+        }
+
+        // FastAPI returns error detail as a plain string for hand-raised HTTPExceptions,
+        // but as an ARRAY of {loc, msg, type} objects for request-schema (Pydantic)
+        // validation failures (422s) — rendering that array directly produces
+        // "[object Object],[object Object]". Normalize both shapes into one clean string.
+        function formatApiError(detail) {
+            if (detail == null) return "Unknown error";
+            if (typeof detail === "string") return detail;
+            if (Array.isArray(detail)) {
+                return detail.map(d => {
+                    if (d && typeof d === "object") {
+                        const field = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : null;
+                        return field ? `${field}: ${d.msg}` : (d.msg || JSON.stringify(d));
+                    }
+                    return String(d);
+                }).join("\n");
+            }
+            if (typeof detail === "object") return detail.msg || JSON.stringify(detail);
+            return String(detail);
+        }
+
+        // Every denial/failure that goes to the System Event Logs panel should ALSO
+        // interrupt the user with a clean dialog — the logs panel sits at the bottom
+        // of the page and is easy to miss entirely (e.g. a manual trade getting
+        // silently DENIED with no visible feedback beyond a log line).
+        async function logError(logMsg, dialogTitle, dialogMsg) {
+            logEvent(logMsg);
+            await CustomDialog.alert(dialogMsg, dialogTitle, "❌");
         }
 
         function getRiskBadge(level) {
@@ -2560,10 +2592,11 @@
                     document.getElementById("manualTP").value = "";
                     document.getElementById("manualTS").value = "";
                 } else {
-                    logEvent(`[SYSTEM] Manual trade placement DENIED: ${res.detail || "Error"}`);
+                    const reason = formatApiError(res.detail);
+                    await logError(`[SYSTEM] Manual trade placement DENIED: ${reason}`, "Manual Trade Denied", reason);
                 }
             } catch (e) {
-                logEvent(`[SYSTEM] Manual trade failure: ${e}`);
+                await logError(`[SYSTEM] Manual trade failure: ${e}`, "Manual Trade Error", String(e));
             }
         }
 
@@ -2596,10 +2629,11 @@
                     fetchStats();
                     fetchWalletBalance();
                 } else {
-                    logEvent(`[SYSTEM] Exit DENIED: ${res.detail || "Error"}`);
+                    const reason = formatApiError(res.detail);
+                    await logError(`[SYSTEM] Exit DENIED: ${reason}`, "Exit Denied", reason);
                 }
             } catch (e) {
-                logEvent(`[SYSTEM] Exit failure: ${e}`);
+                await logError(`[SYSTEM] Exit failure: ${e}`, "Exit Error", String(e));
             }
         }
 
@@ -2629,10 +2663,11 @@
                     logEvent(`[SYSTEM] Paper deposit SUCCESS. New balance: $${res.balance.toFixed(2)}`);
                     fetchWalletBalance();
                 } else {
-                    logEvent(`[SYSTEM] Paper deposit DENIED: ${res.detail || 'Error'}`);
+                    const reason = formatApiError(res.detail);
+                    await logError(`[SYSTEM] Paper deposit DENIED: ${reason}`, "Deposit Denied", reason);
                 }
             } catch (e) {
-                logEvent(`[SYSTEM] Paper deposit failure: ${e}`);
+                await logError(`[SYSTEM] Paper deposit failure: ${e}`, "Deposit Error", String(e));
             }
         }
 
@@ -2670,10 +2705,11 @@
                     fetchWalletBalance();
                     fetchStats();
                 } else {
-                    logEvent(`[SYSTEM] Paper reset DENIED: ${res.detail || 'Error'}`);
+                    const reason = formatApiError(res.detail);
+                    await logError(`[SYSTEM] Paper reset DENIED: ${reason}`, "Reset Denied", reason);
                 }
             } catch (e) {
-                logEvent(`[SYSTEM] Paper reset failure: ${e}`);
+                await logError(`[SYSTEM] Paper reset failure: ${e}`, "Reset Error", String(e));
             }
         }
 
@@ -2928,7 +2964,7 @@
                 logEvent(`[SYSTEM] All strategies updated to ${mode.toUpperCase()} mode.`);
                 el.value = ""; // Reset selector
             } catch (e) {
-                logEvent(`[SYSTEM] Error updating global mode: ${e}`);
+                await logError(`[SYSTEM] Error updating global mode: ${e}`, "Update Failed", String(e));
             }
         }
 
@@ -3290,7 +3326,7 @@
                 });
                 const res = await r.json();
                 if (!r.ok) {
-                    await CustomDialog.alert(res.detail || "Unknown error", "Allocation Failed", "❌");
+                    await CustomDialog.alert(formatApiError(res.detail), "Allocation Failed", "❌");
                     return;
                 }
                 fetchDutchingArena();
@@ -3599,7 +3635,7 @@
                 });
                 const res = await r.json();
                 if (!r.ok) {
-                    await CustomDialog.alert(res.detail || "Unknown error", "Save Failed", "❌");
+                    await CustomDialog.alert(formatApiError(res.detail), "Save Failed", "❌");
                     return;
                 }
                 document.getElementById(inputId).value = "";
@@ -3647,7 +3683,7 @@
                 });
                 const res = await r.json();
                 if (!r.ok) {
-                    await CustomDialog.alert(res.detail || 'Unknown error', 'Execution Failed', '❌');
+                    await CustomDialog.alert(formatApiError(res.detail), 'Execution Failed', '❌');
                     return;
                 }
                 await CustomDialog.alert(
