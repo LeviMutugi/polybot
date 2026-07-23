@@ -295,8 +295,8 @@ class PolyYieldEngine:
                      slippage_bps, market_id, market_title, market_url, token_id, outcome, entry_price,
                      implied_prob, yes_price, no_price, annualized_apy, profit_pct, days_to_expiry,
                      action, exec_mode, suggested_usdc, status, notes, instructions, legs,
-                     max_profit_usdc, max_loss_usdc, payoff_type, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                     max_profit_usdc, max_loss_usdc, payoff_type, p_sum, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
                 """, [
                     opp.get("id"), opp.get("strategy"), opp.get("risk_level"), opp.get("exec_mode"),
                     opp.get("market_type", "Binary"), opp.get("reward_score", 0.0), opp.get("slippage_bps", 0.0),
@@ -307,7 +307,8 @@ class PolyYieldEngine:
                     opp.get("action"), opp.get("exec_mode"), opp.get("suggested_usdc"),
                     opp.get("status", "open"), opp.get("notes"),
                     json.dumps(opp.get("instructions")), json.dumps(opp.get("legs")),
-                    opp.get("max_profit_usdc"), opp.get("max_loss_usdc"), opp.get("payoff_type", "directional")
+                    opp.get("max_profit_usdc"), opp.get("max_loss_usdc"), opp.get("payoff_type", "directional"),
+                    opp.get("p_sum")
                 ])
                 conn.commit()
             await self._broadcast({"type": "opportunity_update", "data": opp})
@@ -414,8 +415,9 @@ class PolyYieldEngine:
                 return await self._execute_multi_leg(opp, legs, allocated_usdc, mode, max_slippage, triggered_by)
             return await self._execute_single_leg(opp, allocated_usdc, mode, max_slippage, is_manual_trade, triggered_by)
 
-    def _paper_open(self, allocated_usdc: float, description: str):
-        """Debit the paper wallet for a new position. Returns (pos_id, error)."""
+    def _paper_open(self, allocated_usdc: float, description: str, gas_usdc: float = 0.0):
+        """Debit the paper wallet for a new position, plus a simulated gas fee (so
+        paper PnL isn't systematically optimistic vs. live). Returns (pos_id, error)."""
         from services.wallet import wallet_service, InsufficientFundsError
         pos_id = f"pos_{uuid.uuid4().hex[:8]}"
         try:
@@ -427,6 +429,19 @@ class PolyYieldEngine:
             return None, str(e)
         except Exception as e:
             return None, f"Paper wallet debit failed: {e}"
+
+        if gas_usdc > 0:
+            try:
+                wallet_service.debit("paper", gas_usdc, "gas_fee",
+                                     position_id=pos_id,
+                                     description=f"Simulated gas: {description}"[:120],
+                                     idempotency_key=f"gas_open_{pos_id}")
+            except InsufficientFundsError as e:
+                self._paper_refund(pos_id, allocated_usdc, "insufficient funds for gas fee")
+                return None, f"Insufficient funds for gas fee: {e}"
+            except Exception as e:
+                self._paper_refund(pos_id, allocated_usdc, "gas debit failed")
+                return None, f"Paper gas debit failed: {e}"
         return pos_id, None
 
     def _paper_refund(self, pos_id: str, amount: float, reason: str):
@@ -479,8 +494,10 @@ class PolyYieldEngine:
                                  f"({drift_pct:.2f}% drift). Wait for the next scan."}
             leg_fills.append({"leg": leg, "fill_price": walk["price"]})
 
+        est_gas_usdc = (await gas_tracker.get_gas_cost_usdc()) * len(legs)
+
         if mode == "paper":
-            pos_id, err = self._paper_open(allocated_usdc, f"Buy basket: {opp.get('market_title', '')[:80]}")
+            pos_id, err = self._paper_open(allocated_usdc, f"Buy basket: {opp.get('market_title', '')[:80]}", gas_usdc=est_gas_usdc)
             if err:
                 return {"success": False, "error": err}
             total_cost = 0.0
@@ -490,9 +507,9 @@ class PolyYieldEngine:
                 total_cost += lf["leg"]["stake_usdc"]
                 min_shares = shares if min_shares is None else min(min_shares, shares)
             try:
-                await self._record_position(opp, min_shares or 0.0, allocated_usdc, "paper_basket_order", fill_price=opp.get("entry_price"), pos_id=pos_id, triggered_by=triggered_by)
+                await self._record_position(opp, min_shares or 0.0, allocated_usdc, "paper_basket_order", fill_price=opp.get("entry_price"), pos_id=pos_id, triggered_by=triggered_by, gas_usdc=est_gas_usdc)
             except Exception as e:
-                self._paper_refund(pos_id, allocated_usdc, "basket position record failed")
+                self._paper_refund(pos_id, allocated_usdc + est_gas_usdc, "basket position record failed")
                 return {"success": False, "error": f"Failed to record position (funds refunded): {e}"}
             await alert.send(f"Paper basket trade executed: {opp['market_title']} for ${allocated_usdc:.2f} USDC", level="success")
             return {"success": True, "mode": "paper", "position_id": pos_id, "cost_usdc": allocated_usdc}
@@ -529,7 +546,7 @@ class PolyYieldEngine:
         total_cost = sum(p.get("fill_cost", 0) for p in placed)
         min_shares = min(p.get("fill_shares", 0) for p in placed) if placed else 0
         order_ids_str = ",".join(str(p.get("order_id", "")) for p in placed)
-        new_pos_id = await self._record_position(opp, min_shares, total_cost or allocated_usdc, order_ids_str, fill_price=opp.get("entry_price"), triggered_by=triggered_by)
+        new_pos_id = await self._record_position(opp, min_shares, total_cost or allocated_usdc, order_ids_str, fill_price=opp.get("entry_price"), triggered_by=triggered_by, gas_usdc=est_gas_usdc)
         await alert.send(f"Live Basket trade success: {opp['market_title']} for ${total_cost or allocated_usdc:.2f} USDC", level="success")
         return {"success": True, "placed": len(placed), "position_id": new_pos_id, "cost_usdc": total_cost or allocated_usdc}
 
@@ -562,15 +579,17 @@ class PolyYieldEngine:
             exec_price = walk["price"]
             opp["entry_price"] = exec_price  # execute at the verified current price
 
+        est_gas_usdc = await gas_tracker.get_gas_cost_usdc()
+
         if mode == "paper":
-            pos_id, err = self._paper_open(allocated_usdc, f"Buy: {opp.get('market_title', '')[:80]}")
+            pos_id, err = self._paper_open(allocated_usdc, f"Buy: {opp.get('market_title', '')[:80]}", gas_usdc=est_gas_usdc)
             if err:
                 return {"success": False, "error": err}
             shares = allocated_usdc / exec_price
             try:
-                await self._record_position(opp, shares, allocated_usdc, "paper_order_id", fill_price=exec_price, pos_id=pos_id, triggered_by=triggered_by)
+                await self._record_position(opp, shares, allocated_usdc, "paper_order_id", fill_price=exec_price, pos_id=pos_id, triggered_by=triggered_by, gas_usdc=est_gas_usdc)
             except Exception as e:
-                self._paper_refund(pos_id, allocated_usdc, "position record failed")
+                self._paper_refund(pos_id, allocated_usdc + est_gas_usdc, "position record failed")
                 return {"success": False, "error": f"Failed to record position (funds refunded): {e}"}
             await alert.send(f"Paper trade executed: {opp['market_title']} -> {opp['outcome']} for ${allocated_usdc:.2f} USDC at ${exec_price:.4f}", level="success")
             return {"success": True, "mode": "paper", "position_id": pos_id, "cost_usdc": allocated_usdc}
@@ -600,7 +619,7 @@ class PolyYieldEngine:
                 allocated_usdc = fill_res["fill_cost"]
                 price = fill_res["fill_price"]
 
-                new_pos_id = await self._record_position(opp, shares, allocated_usdc, order_id, fill_price=price, triggered_by=triggered_by)
+                new_pos_id = await self._record_position(opp, shares, allocated_usdc, order_id, fill_price=price, triggered_by=triggered_by, gas_usdc=est_gas_usdc)
                 await alert.send(f"Manual trade executed: {opp['market_title']} -> {opp['outcome']} for ${allocated_usdc:.2f} USDC", level="success")
                 return {"success": True, "order_id": order_id, "position_id": new_pos_id, "cost_usdc": allocated_usdc}
             except Exception as e:
@@ -619,7 +638,7 @@ class PolyYieldEngine:
                 shares = fill_res["fill_shares"]
                 cost_usdc = fill_res["fill_cost"]
                 fill_price = fill_res["fill_price"]
-                new_pos_id = await self._record_position(opp, shares, cost_usdc, order_id, fill_price=fill_price, triggered_by=triggered_by)
+                new_pos_id = await self._record_position(opp, shares, cost_usdc, order_id, fill_price=fill_price, triggered_by=triggered_by, gas_usdc=est_gas_usdc)
                 await alert.send(f"Live trade executed & filled: {opp['market_title']} -> {opp['outcome']} for ${cost_usdc:.2f} USDC at ${fill_price:.4f}", level="success")
                 return {"success": True, "order_id": order_id, "position_id": new_pos_id, "cost_usdc": cost_usdc}
             else:
@@ -717,10 +736,12 @@ class PolyYieldEngine:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def _record_position(self, opp: dict, shares: float, cost_usdc: float, order_id: str, fill_price: float = None, pos_id: str = None, triggered_by: str = "bot"):
+    async def _record_position(self, opp: dict, shares: float, cost_usdc: float, order_id: str, fill_price: float = None, pos_id: str = None, triggered_by: str = "bot", gas_usdc: float = None):
         from strategies.base import days_to_expiry
         pos_id = pos_id or f"pos_{uuid.uuid4().hex[:8]}"
         mode = await cfg.get_typed("poly_yield.active_mode", str, "paper")
+        if gas_usdc is None:
+            gas_usdc = await gas_tracker.get_gas_cost_usdc()
 
         # Best-/worst-case payoff computed from the ACTUAL fill (shares, cost) rather
         # than the opportunity's pre-execution estimate, since slippage during fill can
@@ -787,7 +808,7 @@ class PolyYieldEngine:
                     opp.get("market_title"), opp.get("token_id"), opp.get("outcome"),
                     shares, opp.get("entry_price"), cost_usdc, str(order_id), "open",
                     opp.get("annualized_apy"), opp.get("profit_pct"), opp.get("days_to_expiry"),
-                    entry_price, 0.005, opp.get("risk_level"), opp.get("slippage_bps"),
+                    entry_price, gas_usdc, opp.get("risk_level"), opp.get("slippage_bps"),
                     opp.get("reward_score"), (cost_usdc * opp.get("profit_pct", 0.0) / 100.0 if opp.get("profit_pct") else 0.0),
                     mode, sl_price, tp_price, ts_pct, entry_price,
                     max_profit_usdc, max_loss_usdc, triggered_by,
@@ -831,6 +852,7 @@ class PolyYieldEngine:
 
         token_id = pos.get("token_id")  # persisted at entry time
         mode = pos["mode"]
+        est_gas_usdc = await gas_tracker.get_gas_cost_usdc()
 
         # Fallback: source CLOB token ID from Gamma API if we are in live mode without a stored one
         if mode == "live" and not token_id:
@@ -871,7 +893,7 @@ class PolyYieldEngine:
                     fill_res = await self._verify_order_fill(order_id)
                     if fill_res.get("success"):
                         exit_price = fill_res["fill_price"]
-                        realized_pnl = fill_res["fill_cost"] - cost - 0.005 # deduct gas estimate
+                        realized_pnl = fill_res["fill_cost"] - cost - est_gas_usdc
                     else:
                         return {"success": False, "error": f"Sell order not filled: {fill_res.get('error')}"}
                 else:
@@ -880,15 +902,17 @@ class PolyYieldEngine:
                 _log.error("Live exit execution failed: %s", e)
                 return {"success": False, "error": str(e)}
         else:
-            # Paper trading / Read-only exit
-            realized_pnl = (shares * current_price) - cost
+            # Paper trading / Read-only exit — apply the same simulated gas friction a
+            # live sell would pay, so paper PnL isn't systematically optimistic.
+            realized_pnl = (shares * current_price) - cost - est_gas_usdc
 
         status = "won" if realized_pnl >= 0 else "lost"
 
-        # Credit paper wallet with returned capital (cost + pnl, floored at 0)
+        # Credit paper wallet with returned capital (cost + pnl, floored at 0), net of
+        # the simulated exit gas fee.
         if mode == "paper":
             from services.wallet import wallet_service
-            return_amount = max(0.0, shares * current_price)
+            return_amount = max(0.0, shares * current_price - est_gas_usdc)
             wallet_service.credit("paper", return_amount, "trade_exit",
                                   position_id=pos_id,
                                   description=f"Exit ({reason}): {pos['market_title'][:80]}",
