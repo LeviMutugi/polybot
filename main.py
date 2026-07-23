@@ -1,6 +1,6 @@
 """
 PolyYield Main Entrypoint
-FastAPI web server serving REST endpoints, WebSocket telemetry, and the Glassmorphic HTML5 UI dashboard.
+FastAPI web server serving REST endpoints, WebSocket telemetry, and the HTML5 UI dashboard.
 """
 import asyncio
 import json
@@ -707,7 +707,7 @@ async def favicon():
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard(request: Request):
-    """Serve the single-page Glassmorphic dashboard."""
+    """Serve the single-page dashboard."""
     try:
         with open("templates/index.html", "r", encoding="utf-8") as f:
             html_content = f.read()

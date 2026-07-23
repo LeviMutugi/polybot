@@ -6,18 +6,99 @@
     <title>PolyYield // Quantum Prediction Market Engine</title>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <script>
+        (function () {
+            var saved = localStorage.getItem('poly_yield_theme');
+            var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
+        })();
+    </script>
     <style>
         :root {
-            --bg-obsidian: #0b0d19;
-            --panel-glass: rgba(18, 22, 43, 0.65);
-            --border-glow: rgba(123, 44, 191, 0.35);
-            --cyber-emerald: #05ffc9;
-            --vibrant-violet: #7b2cbf;
-            --alert-orange: #ff9f1c;
-            --hot-pink: #ff007f;
-            --text-primary: #f3f4f6;
-            --text-secondary: #9ca3af;
-            --transition-smooth: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            /* ---- Brand palette ---- */
+            --lime-cream: #d9ed92;
+            --light-green: #b5e48c;
+            --light-green-2: #99d98c;
+            --emerald: #76c893;
+            --ocean-mist: #52b69a;
+            --tropical-teal: #34a0a4;
+            --bondi-blue: #168aad;
+            --cerulean: #1a759f;
+            --baltic-blue: #1e6091;
+            --yale-blue: #184e77;
+
+            /* ---- Surfaces & text (light theme, default) ---- */
+            --bg: #ffffff;
+            --bg-subtle: #f5f8f7;
+            --surface: #ffffff;
+            --surface-alt: #f1f5f4;
+            --surface-hover: #e9f2ef;
+            --border: #e2e8e6;
+            --border-strong: #cfd9d6;
+            --text-primary: #16232a;
+            --text-secondary: #62726f;
+            --text-inverse: #ffffff;
+
+            /* ---- Semantic accents (derived from the palette) ---- */
+            --accent: var(--cerulean);
+            --accent-strong: var(--baltic-blue);
+            --accent-deep: var(--yale-blue);
+            --accent-soft: #e8f5f2;
+            --cta-bg: var(--light-green-2);
+            --cta-bg-hover: var(--light-green);
+            --cta-text: var(--yale-blue);
+
+            /* Kept variable names for minimal markup churn — repointed away from purple/neon */
+            --cyber-emerald: #1f8a72;
+            --vibrant-violet: var(--baltic-blue);
+            --alert-orange: var(--cerulean);
+            --hot-pink: #b3383f;
+            --border-glow: rgba(52, 160, 164, 0.35);
+
+            --success-bg: #eaf7ee;
+            --warning-bg: #eaf3f7;
+            --danger-bg: #fbecec;
+
+            --shadow-sm: 0 1px 2px rgba(20, 30, 40, 0.05);
+            --shadow-md: 0 8px 28px rgba(20, 30, 40, 0.07);
+            --radius-lg: 22px;
+            --radius-md: 14px;
+            --radius-pill: 999px;
+            --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        [data-theme="dark"] {
+            --bg: #101c22;
+            --bg-subtle: #0c1519;
+            --surface: #17262d;
+            --surface-alt: #1d2f37;
+            --surface-hover: #24393f;
+            --border: #283e45;
+            --border-strong: #33505a;
+            --text-primary: #edf4f2;
+            --text-secondary: #93a9a6;
+            --text-inverse: #101c22;
+
+            --accent: #58bcdc;
+            --accent-strong: #3491bd;
+            --accent-deep: #bfe3d8;
+            --accent-soft: rgba(52, 160, 164, 0.18);
+            --cta-bg: var(--tropical-teal);
+            --cta-bg-hover: var(--ocean-mist);
+            --cta-text: #0c1519;
+
+            --cyber-emerald: #5fd6c4;
+            --vibrant-violet: #3491bd;
+            --alert-orange: #58bcdc;
+            --hot-pink: #e0808f;
+            --border-glow: rgba(95, 214, 196, 0.4);
+
+            --success-bg: rgba(118, 200, 147, 0.15);
+            --warning-bg: rgba(88, 188, 220, 0.15);
+            --danger-bg: rgba(224, 128, 143, 0.15);
+
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+            --shadow-md: 0 10px 32px rgba(0, 0, 0, 0.45);
         }
 
         * {
@@ -27,23 +108,20 @@
         }
 
         body {
-            background-color: var(--bg-obsidian);
+            background-color: var(--bg);
             color: var(--text-primary);
             font-family: 'Outfit', sans-serif;
             overflow-x: hidden;
-            background-image: 
-                radial-gradient(circle at 10% 20%, rgba(123, 44, 191, 0.15) 0%, transparent 40%),
-                radial-gradient(circle at 90% 80%, rgba(5, 255, 201, 0.08) 0%, transparent 45%);
-            background-attachment: fixed;
+            transition: background-color 0.25s ease, color 0.25s ease;
         }
 
         header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 24px 40px;
-            backdrop-filter: blur(20px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 20px 40px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
             position: sticky;
             top: 0;
             z-index: 100;
@@ -51,11 +129,11 @@
 
         .nav-tabs {
             display: flex;
-            gap: 8px;
-            background: rgba(255, 255, 255, 0.03);
+            gap: 4px;
+            background: var(--surface-alt);
             padding: 6px;
-            border-radius: 14px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-pill);
+            border: 1px solid var(--border);
         }
 
         .nav-tab {
@@ -66,20 +144,20 @@
             font-family: 'Space Grotesk', sans-serif;
             font-size: 13px;
             font-weight: 600;
-            border-radius: 10px;
+            border-radius: var(--radius-pill);
             cursor: pointer;
             transition: var(--transition-smooth);
         }
 
         .nav-tab:hover {
-            color: #fff;
-            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            background: var(--surface-hover);
         }
 
         .nav-tab.active {
             color: #fff;
-            background: linear-gradient(135deg, var(--vibrant-violet), #5b1a99);
-            box-shadow: 0 4px 12px rgba(123, 44, 191, 0.4);
+            background: var(--accent-strong);
+            box-shadow: var(--shadow-sm);
         }
 
         .logo-container {
@@ -91,37 +169,57 @@
         .logo-symbol {
             width: 32px;
             height: 32px;
-            background: linear-gradient(135deg, var(--cyber-emerald), var(--vibrant-violet));
-            border-radius: 50% 0 50% 50%;
-            transform: rotate(-45deg);
-            animation: pulse-glow 3s infinite alternate;
+            background: var(--accent-strong);
+            border-radius: 10px;
         }
 
         .logo-text {
             font-family: 'Space Grotesk', sans-serif;
-            font-size: 24px;
+            font-size: 22px;
             font-weight: 700;
-            letter-spacing: 1px;
-            background: linear-gradient(to right, #fff, var(--cyber-emerald));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            letter-spacing: 0.2px;
+            color: var(--text-primary);
         }
 
         .network-banner {
             display: flex;
             align-items: center;
             gap: 16px;
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 30px;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-pill);
             padding: 6px 16px;
             cursor: pointer;
             transition: var(--transition-smooth);
         }
 
         .network-banner:hover {
-            border-color: var(--cyber-emerald);
-            box-shadow: 0 0 10px rgba(5, 255, 201, 0.2);
+            border-color: var(--accent);
+        }
+
+        .theme-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            font-size: 16px;
+            transition: var(--transition-smooth);
+        }
+
+        .theme-toggle:hover {
+            border-color: var(--accent);
+            background: var(--surface-hover);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 14px;
         }
 
         .network-status-dot {
@@ -129,12 +227,10 @@
             height: 8px;
             border-radius: 50%;
             background-color: var(--cyber-emerald);
-            box-shadow: 0 0 8px var(--cyber-emerald);
         }
 
         .network-status-dot.amoy {
             background-color: var(--alert-orange);
-            box-shadow: 0 0 8px var(--alert-orange);
         }
 
         .main-container {
@@ -150,57 +246,43 @@
         .sidebar {
             display: flex;
             flex-direction: column;
-            gap: 32px;
+            gap: 24px;
         }
 
         .glass-panel {
-            background: var(--panel-glass);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 20px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
             padding: 24px;
             position: relative;
             overflow: hidden;
             transition: var(--transition-smooth);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.25);
-        }
-
-        .glass-panel::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, transparent, rgba(255, 255, 255, 0.02));
-            pointer-events: none;
+            box-shadow: var(--shadow-sm);
         }
 
         .glass-panel:hover {
-            border-color: var(--border-glow);
-            box-shadow: 0 12px 40px 0 rgba(123, 44, 191, 0.15);
+            border-color: var(--border-strong);
+            box-shadow: var(--shadow-md);
         }
 
         .panel-title {
             font-family: 'Space Grotesk', sans-serif;
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 600;
             margin-bottom: 20px;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.2px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid var(--border);
             padding-bottom: 10px;
+            color: var(--text-primary);
         }
 
         .metric-value {
-            font-size: 32px;
+            font-size: 30px;
             font-weight: 800;
-            background: linear-gradient(to right, #fff, #b3c5ff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--text-primary);
             margin-top: 8px;
         }
 
@@ -224,19 +306,24 @@
 
         .control-input {
             width: 100%;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 10px;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
             padding: 10px 14px;
-            color: #fff;
+            color: var(--text-primary);
             font-family: inherit;
             outline: none;
             transition: var(--transition-smooth);
         }
 
         .control-input:focus {
-            border-color: var(--vibrant-violet);
-            box-shadow: 0 0 8px rgba(123, 44, 191, 0.2);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+
+        select.control-input option {
+            background: var(--surface);
+            color: var(--text-primary);
         }
 
         /* Toggle Switches */
@@ -250,6 +337,7 @@
         .switch-label {
             font-size: 14px;
             font-weight: 500;
+            color: var(--text-primary);
         }
 
         .switch {
@@ -272,7 +360,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: var(--border-strong);
             transition: .4s;
             border-radius: 34px;
         }
@@ -284,13 +372,13 @@
             width: 16px;
             left: 4px;
             bottom: 4px;
-            background-color: white;
+            background-color: #fff;
             transition: .4s;
             border-radius: 50%;
         }
 
         input:checked + .slider {
-            background-color: var(--cyber-emerald);
+            background-color: var(--tropical-teal);
         }
 
         input:checked + .slider:before {
@@ -301,7 +389,7 @@
         .workspace {
             display: flex;
             flex-direction: column;
-            gap: 32px;
+            gap: 24px;
         }
 
         .stats-grid {
@@ -324,18 +412,19 @@
 
         th {
             font-family: 'Space Grotesk', sans-serif;
-            font-size: 13px;
+            font-size: 12px;
             color: var(--text-secondary);
             font-weight: 600;
-            padding: 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
         }
 
         td {
-            padding: 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
             font-size: 14px;
             vertical-align: middle;
+            color: var(--text-primary);
         }
 
         tr {
@@ -343,28 +432,28 @@
         }
 
         tr:hover td {
-            background: rgba(255, 255, 255, 0.02);
+            background: var(--surface-alt);
         }
 
         /* Custom Badges */
         .badge {
             display: inline-block;
-            padding: 4px 10px;
-            border-radius: 12px;
+            padding: 4px 12px;
+            border-radius: var(--radius-pill);
             font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
         }
 
-        .badge-low { background: rgba(5, 255, 201, 0.1); color: var(--cyber-emerald); border: 1px solid rgba(5, 255, 201, 0.2); }
-        .badge-med { background: rgba(255, 159, 28, 0.1); color: var(--alert-orange); border: 1px solid rgba(255, 159, 28, 0.2); }
-        .badge-high { background: rgba(255, 0, 127, 0.1); color: var(--hot-pink); border: 1px solid rgba(255, 0, 127, 0.2); }
+        .badge-low { background: var(--success-bg); color: var(--cyber-emerald); border: 1px solid transparent; }
+        .badge-med { background: var(--warning-bg); color: var(--alert-orange); border: 1px solid transparent; }
+        .badge-high { background: var(--danger-bg); color: var(--hot-pink); border: 1px solid transparent; }
 
         .btn {
-            background: linear-gradient(135deg, var(--vibrant-violet), #5b1a99);
-            color: #fff;
-            border: none;
-            border-radius: 10px;
+            background: var(--surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-pill);
             padding: 10px 20px;
             font-family: inherit;
             font-size: 13px;
@@ -377,17 +466,18 @@
         }
 
         .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(123, 44, 191, 0.4);
+            border-color: var(--accent);
+            background: var(--surface-hover);
         }
 
         .btn-emerald {
-            background: linear-gradient(135deg, var(--cyber-emerald), #00b894);
-            color: #0b0d19;
+            background: var(--cta-bg);
+            color: var(--cta-text);
+            border: 1px solid transparent;
         }
 
         .btn-emerald:hover {
-            box-shadow: 0 4px 12px rgba(5, 255, 201, 0.4);
+            background: var(--cta-bg-hover);
         }
 
         /* Order Book Display */
@@ -399,10 +489,10 @@
         }
 
         .ob-side {
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 12px;
+            background: var(--surface-alt);
+            border-radius: var(--radius-md);
             padding: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
         }
 
         .ob-title {
@@ -428,14 +518,15 @@
             right: 0;
             top: 0;
             bottom: 0;
-            background: rgba(5, 255, 201, 0.05);
+            background: var(--success-bg);
             z-index: 1;
             transition: width 0.3s ease;
         }
 
         .ob-bar.bid {
             left: 0;
-            background: rgba(123, 44, 191, 0.05);
+            right: auto;
+            background: var(--accent-soft);
         }
 
         .ob-val {
@@ -449,7 +540,7 @@
             overflow-y: auto;
             font-family: monospace;
             font-size: 12px;
-            color: #b3c5ff;
+            color: var(--text-secondary);
             display: flex;
             flex-direction: column;
             gap: 6px;
@@ -461,7 +552,7 @@
         }
 
         .logs-panel::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.1);
+            background: var(--border-strong);
             border-radius: 2px;
         }
 
@@ -472,8 +563,8 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(11, 13, 25, 0.85);
-            backdrop-filter: blur(8px);
+            background: rgba(16, 24, 28, 0.5);
+            backdrop-filter: blur(4px);
             z-index: 1000;
             display: flex;
             justify-content: center;
@@ -490,16 +581,11 @@
 
         .modal-content {
             width: 450px;
-            background: #12162b;
-            border: 1px solid var(--border-glow);
-            border-radius: 20px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
             padding: 32px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-        }
-
-        @keyframes pulse-glow {
-            from { box-shadow: 0 0 12px var(--vibrant-violet); }
-            to { box-shadow: 0 0 24px var(--cyber-emerald); }
+            box-shadow: var(--shadow-md);
         }
 
         /* Bot Strategy Manager Grid & Cards */
@@ -509,9 +595,9 @@
             gap: 20px;
         }
         .strategy-card {
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 16px;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
             padding: 18px;
             display: flex;
             flex-direction: column;
@@ -519,15 +605,13 @@
             transition: var(--transition-smooth);
         }
         .strategy-card:hover {
-            border-color: var(--border-glow);
-            background: rgba(255, 255, 255, 0.03);
-            box-shadow: 0 4px 20px rgba(123, 44, 191, 0.08);
+            border-color: var(--border-strong);
         }
         .strategy-card-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            border-bottom: 1px solid var(--border);
             padding-bottom: 8px;
             margin-bottom: 4px;
         }
@@ -535,9 +619,7 @@
             font-family: 'Space Grotesk', sans-serif;
             font-size: 15px;
             font-weight: 700;
-            background: linear-gradient(to right, #fff, #b3c5ff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--text-primary);
         }
         .strategy-params-grid {
             display: grid;
@@ -586,9 +668,14 @@
             <button class="nav-tab" id="tabBtnDutching" onclick="switchMainTab('dutching')">🎲 Dutching Bot Arena</button>
             <button class="nav-tab" id="tabBtnKeyVault" onclick="switchMainTab('keyvault')">🔑 Key Vault</button>
         </div>
-        <div class="network-banner" id="networkToggle" onclick="toggleNetwork()">
-            <div class="network-status-dot" id="networkDot"></div>
-            <span id="networkText" style="font-size: 14px; font-weight: 600; letter-spacing: 0.5px;">POLYGON MAINNET</span>
+        <div class="header-actions">
+            <div class="network-banner" id="networkToggle" onclick="toggleNetwork()">
+                <div class="network-status-dot" id="networkDot"></div>
+                <span id="networkText" style="font-size: 14px; font-weight: 600; letter-spacing: 0.5px;">POLYGON MAINNET</span>
+            </div>
+            <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light / dark theme">
+                <span id="themeToggleIcon">🌙</span>
+            </button>
         </div>
     </header>
 
@@ -611,8 +698,8 @@
                     <button class="btn" onclick="fetchStats()" style="padding: 6px 12px; font-size: 11px;">Refresh Stats</button>
                 </div>
                 <div style="margin-top: 10px; display: flex; gap: 8px;">
-                    <button class="btn" onclick="paperDeposit()" style="padding: 6px 12px; font-size: 11px; background: linear-gradient(135deg, #1a5c3a, #0e3d25); border: 1px solid var(--cyber-emerald);">+ Add Paper Funds</button>
-                    <button class="btn" onclick="paperReset()" style="padding: 6px 12px; font-size: 11px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">Reset Balance</button>
+                    <button class="btn" onclick="paperDeposit()" style="padding: 6px 12px; font-size: 11px; background: var(--success-bg); border: 1px solid var(--cyber-emerald); color: var(--cyber-emerald);">+ Add Paper Funds</button>
+                    <button class="btn" onclick="paperReset()" style="padding: 6px 12px; font-size: 11px;">Reset Balance</button>
                 </div>
             </div>
 
@@ -698,7 +785,7 @@
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                     <div class="control-group">
                         <label class="control-label">Outcome</label>
-                        <select id="manualOutcome" class="control-input" style="background:#1b203c;">
+                        <select id="manualOutcome" class="control-input">
                             <option value="YES">YES</option>
                             <option value="NO">NO</option>
                         </select>
@@ -766,7 +853,7 @@
                                 <th>
                                     Strategy
                                     <input type="text" id="filterStrategy" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px;" placeholder="Filter..." oninput="filterOpportunities()">
-                                    <select id="filterRisk" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px; background:#1b203c;" onchange="filterOpportunities()">
+                                    <select id="filterRisk" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px; " onchange="filterOpportunities()">
                                         <option value="">All Risks</option>
                                         <option value="low">Low Risk</option>
                                         <option value="medium">Medium Risk</option>
@@ -779,7 +866,7 @@
                                 </th>
                                 <th>
                                     Outcome
-                                    <select id="filterOutcome" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px; background:#1b203c;" onchange="filterOpportunities()">
+                                    <select id="filterOutcome" class="control-input" style="padding: 2px 4px; font-size: 10px; margin-top: 4px; " onchange="filterOpportunities()">
                                         <option value="">All</option>
                                         <option value="yes">YES</option>
                                         <option value="no">NO</option>
@@ -825,9 +912,9 @@
                     <span id="botManagerArrow" style="transition: transform 0.3s; font-size: 14px;">▼</span>
                 </div>
                 <div id="botManagerContent" style="display: none; margin-top: 20px;">
-                    <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; background: rgba(255, 255, 255, 0.02); padding: 12px 18px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                    <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; background: var(--surface-alt); padding: 12px 18px; border-radius: 12px; border: 1px solid var(--border);">
                         <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">Apply Mode to All Strategies:</span>
-                        <select id="globalModeSelect" class="control-input" onchange="setGlobalStrategyMode(this)" style="background:#1b203c; width: 200px; padding: 6px 10px; font-size: 12px;">
+                        <select id="globalModeSelect" class="control-input" onchange="setGlobalStrategyMode(this)" style="width: 200px; padding: 6px 10px; font-size: 12px;">
                             <option value="">-- Select Mode --</option>
                             <option value="manual">Manual (Read Only)</option>
                             <option value="semi">Semi-Auto (Approval Req)</option>
@@ -953,7 +1040,7 @@
                     <div style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap; align-items:flex-end;">
                         <div class="control-group" style="margin-bottom:0;">
                             <label class="control-label">Mode</label>
-                            <select id="historyModeFilter" class="control-input" style="background:#1b203c;" onchange="fetchAccountingSummary(); fetchTradeHistory();">
+                            <select id="historyModeFilter" class="control-input" onchange="fetchAccountingSummary(); fetchTradeHistory();">
                                 <option value="paper">Paper</option>
                                 <option value="live">Live</option>
                                 <option value="">All</option>
@@ -961,7 +1048,7 @@
                         </div>
                         <div class="control-group" style="margin-bottom:0;">
                             <label class="control-label">Status</label>
-                            <select id="historyStatusFilter" class="control-input" style="background:#1b203c;" onchange="fetchTradeHistory()">
+                            <select id="historyStatusFilter" class="control-input" onchange="fetchTradeHistory()">
                                 <option value="">All</option>
                                 <option value="open">Open</option>
                                 <option value="won">Won</option>
@@ -970,7 +1057,7 @@
                         </div>
                         <div class="control-group" style="margin-bottom:0;">
                             <label class="control-label">Executed By</label>
-                            <select id="historyExecFilter" class="control-input" style="background:#1b203c;" onchange="fetchTradeHistory()">
+                            <select id="historyExecFilter" class="control-input" onchange="fetchTradeHistory()">
                                 <option value="">All</option>
                                 <option value="bot">🤖 Bot</option>
                                 <option value="manual">🖐 Manual</option>
@@ -999,7 +1086,7 @@
                     </div>
 
                     <div style="margin-top:24px;">
-                        <div onclick="toggleWalletLedger()" style="cursor:pointer; user-select:none; display:flex; justify-content:space-between; align-items:center; font-family:'Space Grotesk', sans-serif; font-size:14px; font-weight:600; color:var(--text-secondary); border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom:8px;">
+                        <div onclick="toggleWalletLedger()" style="cursor:pointer; user-select:none; display:flex; justify-content:space-between; align-items:center; font-family:'Space Grotesk', sans-serif; font-size:14px; font-weight:600; color:var(--text-secondary); border-bottom: 1px solid var(--border); padding-bottom:8px;">
                             <span>Raw Wallet Ledger (Paper) — Full Audit Log</span>
                             <span id="walletLedgerArrow" style="transition: transform 0.3s; font-size:12px;">▼</span>
                         </div>
@@ -1065,7 +1152,7 @@
             </div>
             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;" id="arenaModelCards">
                 <!-- OpenAI GPT-4o Card -->
-                <div class="glass-panel" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(5, 255, 201, 0.2);">
+                <div class="glass-panel" style="background: var(--surface-alt); border: 1px solid rgba(52, 160, 164, 0.4);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <span style="font-weight: 700; font-family: 'Space Grotesk', sans-serif;">OpenAI (GPT-4o)</span>
                         <span class="badge badge-low" id="badge_openai">Active</span>
@@ -1075,7 +1162,7 @@
                         <input type="number" id="alloc_openai" class="control-input" value="10.0" style="font-weight: 700;">
                         <button class="btn" style="padding: 8px 12px; font-size: 11px;" onclick="saveModelAllocation('openai')">Set</button>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid rgba(255,255,255,0.05);">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-secondary);">Win Rate</span>
                         <span style="color: var(--cyber-emerald); font-weight: 600;" id="wr_openai">—</span>
                     </div>
@@ -1086,7 +1173,7 @@
                 </div>
 
                 <!-- Anthropic Claude 3.5 Sonnet Card -->
-                <div class="glass-panel" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(123, 44, 191, 0.3);">
+                <div class="glass-panel" style="background: var(--surface-alt); border: 1px solid rgba(26, 117, 159, 0.4);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <span style="font-weight: 700; font-family: 'Space Grotesk', sans-serif;">Claude 3.5 Sonnet</span>
                         <span class="badge badge-low" id="badge_anthropic">Active</span>
@@ -1096,7 +1183,7 @@
                         <input type="number" id="alloc_anthropic" class="control-input" value="10.0" style="font-weight: 700;">
                         <button class="btn" style="padding: 8px 12px; font-size: 11px;" onclick="saveModelAllocation('anthropic')">Set</button>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid rgba(255,255,255,0.05);">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-secondary);">Win Rate</span>
                         <span style="color: var(--cyber-emerald); font-weight: 600;" id="wr_anthropic">—</span>
                     </div>
@@ -1107,7 +1194,7 @@
                 </div>
 
                 <!-- Moonshot / Kimi Card -->
-                <div class="glass-panel" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255, 159, 28, 0.3);">
+                <div class="glass-panel" style="background: var(--surface-alt); border: 1px solid rgba(22, 138, 173, 0.4);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <span style="font-weight: 700; font-family: 'Space Grotesk', sans-serif;">Moonshot / Kimi</span>
                         <span class="badge badge-med" id="badge_kimi">Active</span>
@@ -1117,7 +1204,7 @@
                         <input type="number" id="alloc_kimi" class="control-input" value="10.0" style="font-weight: 700;">
                         <button class="btn" style="padding: 8px 12px; font-size: 11px;" onclick="saveModelAllocation('kimi')">Set</button>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid rgba(255,255,255,0.05);">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-secondary);">Win Rate</span>
                         <span style="color: var(--cyber-emerald); font-weight: 600;" id="wr_kimi">—</span>
                     </div>
@@ -1128,7 +1215,7 @@
                 </div>
 
                 <!-- DeepSeek Card -->
-                <div class="glass-panel" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255, 0, 127, 0.3);">
+                <div class="glass-panel" style="background: var(--surface-alt); border: 1px solid rgba(30, 96, 145, 0.4);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <span style="font-weight: 700; font-family: 'Space Grotesk', sans-serif;">DeepSeek V3/R1</span>
                         <span class="badge badge-med" id="badge_deepseek">Active</span>
@@ -1138,7 +1225,7 @@
                         <input type="number" id="alloc_deepseek" class="control-input" value="10.0" style="font-weight: 700;">
                         <button class="btn" style="padding: 8px 12px; font-size: 11px;" onclick="saveModelAllocation('deepseek')">Set</button>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid rgba(255,255,255,0.05);">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-secondary);">Win Rate</span>
                         <span style="color: var(--cyber-emerald); font-weight: 600;" id="wr_deepseek">—</span>
                     </div>
@@ -1158,9 +1245,9 @@
                     <span>POLYMARKET MULTI-OUTCOME SCANNER</span>
                     <div style="display: flex; gap: 8px;">
                         <select id="dutchingSort" class="control-input" style="width: auto; padding: 4px 8px; font-size: 11px;" onchange="renderDutchingOpps()">
-                            <option value="roi_desc" style="background: #1b203c; color: #fff;">Sort: Highest ROI</option>
-                            <option value="roi_asc" style="background: #1b203c; color: #fff;">Sort: Lowest ROI</option>
-                            <option value="cost_asc" style="background: #1b203c; color: #fff;">Sort: Lowest Cost</option>
+                            <option value="roi_desc">Sort: Highest ROI</option>
+                            <option value="roi_asc">Sort: Lowest ROI</option>
+                            <option value="cost_asc">Sort: Lowest Cost</option>
                         </select>
                         <button class="btn" onclick="fetchDutchingOpps()" style="font-size: 11px; padding: 4px 10px;">Refresh</button>
                     </div>
@@ -1182,20 +1269,20 @@
                             Select an automated scan opportunity from the left, or test a market instantly using quick presets:
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
-                            <button class="btn" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(5,255,201,0.3); text-align: left; justify-content: space-between;" onclick="loadPresetMarket(1)">
+                            <button class="btn" style="background: var(--surface-alt); border: 1px solid rgba(52,160,164,0.4); text-align: left; justify-content: space-between;" onclick="loadPresetMarket(1)">
                                 <span>🇺🇸 US Presidential Election 2028 (Simulation)</span>
                                 <span style="font-size: 11px; color: var(--cyber-emerald);">Run Side-by-Side LLMs →</span>
                             </button>
-                            <button class="btn" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(123,44,191,0.3); text-align: left; justify-content: space-between;" onclick="loadPresetMarket(2)">
+                            <button class="btn" style="background: var(--surface-alt); border: 1px solid rgba(26,117,159,0.4); text-align: left; justify-content: space-between;" onclick="loadPresetMarket(2)">
                                 <span>🏛️ Next Federal Reserve Chair 2026 (Simulation)</span>
-                                <span style="font-size: 11px; color: #b3c5ff;">Run Side-by-Side LLMs →</span>
+                                <span style="font-size: 11px; color: var(--accent);">Run Side-by-Side LLMs →</span>
                             </button>
-                            <button class="btn" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,159,28,0.3); text-align: left; justify-content: space-between;" onclick="loadPresetMarket(3)">
+                            <button class="btn" style="background: var(--surface-alt); border: 1px solid rgba(30,96,145,0.4); text-align: left; justify-content: space-between;" onclick="loadPresetMarket(3)">
                                 <span>🎬 Oscars Best Picture Winner 2027 (Simulation)</span>
-                                <span style="font-size: 11px; color: var(--alert-orange);">Run Side-by-Side LLMs →</span>
+                                <span style="font-size: 11px; color: var(--accent-strong);">Run Side-by-Side LLMs →</span>
                             </button>
                         </div>
-                        <div style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 16px;">
+                        <div style="border-top: 1px solid var(--border); padding-top: 16px;">
                             <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px;">Custom Market Evaluator</div>
                             <div class="control-group">
                                 <input type="text" id="customMarketQuestion" class="control-input" placeholder="e.g. Who will win the 2028 Election?" value="Who will win the 2028 US Presidential Election?">
@@ -1260,7 +1347,7 @@
             <h2 style="font-family: 'Space Grotesk', sans-serif; margin-bottom: 20px; font-weight: 600;">Wallet Cryptographic Setup</h2>
             <div class="control-group">
                 <label class="control-label">Service Key Type</label>
-                <select id="keyService" class="control-input" style="background:#1b203c;">
+                <select id="keyService" class="control-input">
                     <option value="polymarket_wallet">Polymarket Private Wallet Key (Hot Wallet)</option>
                     <option value="telegram_bot">Telegram Bot API Token</option>
                     <option value="telegram_chat">Telegram Chat ID</option>
@@ -1276,7 +1363,7 @@
                 <input type="text" id="keyLabel" class="control-input" placeholder="e.g. Master Wallet Key">
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <button class="btn" onclick="closeKeyModal()" style="background:transparent; border:1px solid rgba(255,255,255,0.1);">Cancel</button>
+                <button class="btn" onclick="closeKeyModal()" style="background:transparent; border:1px solid var(--border);">Cancel</button>
                 <button class="btn btn-emerald" onclick="submitKey()">Save Key</button>
             </div>
         </div>
@@ -1284,13 +1371,13 @@
 
     <!-- Custom Dialog Modal -->
     <div class="modal" id="customDialogModal">
-        <div class="modal-content" style="max-width: 480px; text-align: center; border: 1px solid var(--border-glow); box-shadow: 0 0 30px rgba(111, 66, 193, 0.2);">
+        <div class="modal-content" style="max-width: 480px; text-align: center; border: 1px solid var(--border-glow); box-shadow: var(--shadow-md);">
             <div id="customDialogIcon" style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-            <h2 id="customDialogTitle" style="font-family: 'Space Grotesk', sans-serif; margin-bottom: 12px; font-weight: 600; color: #fff; font-size: 22px;">Alert</h2>
+            <h2 id="customDialogTitle" style="font-family: 'Space Grotesk', sans-serif; margin-bottom: 12px; font-weight: 600; color: var(--text-primary); font-size: 22px;">Alert</h2>
             <p id="customDialogMessage" style="color: var(--text-secondary); font-size: 14px; line-height: 1.6; margin-bottom: 24px; white-space: pre-line; text-align: left;"></p>
             
             <div id="customDialogPromptContainer" style="display: none; margin-bottom: 24px; text-align: left;">
-                <input type="text" id="customDialogPromptInput" class="control-input" style="width: 100%; box-sizing: border-box; background: #1b203c;">
+                <input type="text" id="customDialogPromptInput" class="control-input" style="width: 100%; box-sizing: border-box; ">
             </div>
             
             <div style="display: flex; gap: 12px; justify-content: flex-end;" id="customDialogButtons">
@@ -1301,6 +1388,19 @@
 
     <!-- Script logic -->
     <script>
+        // Theme toggle (light default / dark opt-in, persisted)
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('poly_yield_theme', theme);
+            const icon = document.getElementById('themeToggleIcon');
+            if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+        }
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+            applyTheme(current === 'dark' ? 'light' : 'dark');
+        }
+        applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+
         let ws;
         let selectedTokenId = null;
         let selectedMarketTitle = "";
@@ -1355,8 +1455,6 @@
                     } else if (type === "confirm") {
                         const btnCancel = document.createElement("button");
                         btnCancel.className = "btn";
-                        btnCancel.style.background = "transparent";
-                        btnCancel.style.border = "1px solid rgba(255,255,255,0.1)";
                         btnCancel.style.padding = "8px 20px";
                         btnCancel.innerText = "Cancel";
                         btnCancel.onclick = () => this.close(false);
@@ -1372,8 +1470,6 @@
                     } else if (type === "prompt") {
                         const btnCancel = document.createElement("button");
                         btnCancel.className = "btn";
-                        btnCancel.style.background = "transparent";
-                        btnCancel.style.border = "1px solid rgba(255,255,255,0.1)";
                         btnCancel.style.padding = "8px 20px";
                         btnCancel.innerText = "Cancel";
                         btnCancel.onclick = () => this.close(null);
@@ -1667,19 +1763,19 @@
                         <td>${formatPayoff(opp.max_profit_usdc, opp.max_loss_usdc)}</td>
                         <td>${execBtn}</td>
                     </tr>
-                    <tr id="details_${idx}" data-opp-id="${escapeHtml(opp.id || '')}" style="display:none; background: rgba(255,255,255,0.015);">
-                        <td colspan="8" style="padding: 16px 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                    <tr id="details_${idx}" data-opp-id="${escapeHtml(opp.id || '')}" style="display:none; background: var(--surface-alt);">
+                        <td colspan="8" style="padding: 16px 24px; border-bottom: 1px solid var(--border);">
                             <div style="display:flex; justify-content:space-between; gap:40px; align-items:center;">
                                 <div style="display:flex; flex-direction:column; gap:8px; font-size:12px; flex:1;">
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span style="color:var(--text-secondary); width:80px; font-weight:600;">Market ID:</span>
-                                        <code style="background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px; color:#b3c5ff; font-family:monospace; font-size:11px;">${escapeHtml(opp.market_id || 'N/A')}</code>
-                                        <button class="btn" onclick="copyOppField(${idx}, 'market_id', event)" style="padding:2px 6px; font-size:10px; background:rgba(255,255,255,0.05);">Copy</button>
+                                        <code style="background:var(--surface-alt); padding:2px 8px; border-radius:4px; color:var(--accent-strong); font-family:monospace; font-size:11px;">${escapeHtml(opp.market_id || 'N/A')}</code>
+                                        <button class="btn" onclick="copyOppField(${idx}, 'market_id', event)" style="padding:2px 6px; font-size:10px; background:var(--surface-alt);">Copy</button>
                                     </div>
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span style="color:var(--text-secondary); width:80px; font-weight:600;">Token ID:</span>
-                                        <code style="background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px; color:#b3c5ff; font-family:monospace; font-size:11px;">${escapeHtml(opp.token_id || 'N/A')}</code>
-                                        <button class="btn" onclick="copyOppField(${idx}, 'token_id', event)" style="padding:2px 6px; font-size:10px; background:rgba(255,255,255,0.05);">Copy</button>
+                                        <code style="background:var(--surface-alt); padding:2px 8px; border-radius:4px; color:var(--accent-strong); font-family:monospace; font-size:11px;">${escapeHtml(opp.token_id || 'N/A')}</code>
+                                        <button class="btn" onclick="copyOppField(${idx}, 'token_id', event)" style="padding:2px 6px; font-size:10px; background:var(--surface-alt);">Copy</button>
                                     </div>
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span style="color:var(--text-secondary); width:80px; font-weight:600;">Market Link:</span>
@@ -1734,7 +1830,7 @@
                 const originalText = btn.innerText;
                 btn.innerText = "Copied!";
                 btn.style.background = "var(--cyber-emerald)";
-                btn.style.color = "#0b0d19";
+                btn.style.color = "var(--cta-text)";
                 setTimeout(() => {
                     btn.innerText = originalText;
                     btn.style.background = "";
@@ -1779,7 +1875,7 @@
             if (manualPanel) {
                 manualPanel.scrollIntoView({ behavior: "smooth", block: "center" });
                 manualPanel.style.borderColor = "var(--cyber-emerald)";
-                manualPanel.style.boxShadow = "0 0 20px rgba(5, 255, 201, 0.3)";
+                manualPanel.style.boxShadow = "0 0 0 3px var(--accent-soft)";
                 setTimeout(() => {
                     manualPanel.style.borderColor = "";
                     manualPanel.style.boxShadow = "";
@@ -1812,7 +1908,7 @@
                         <td><span style="text-transform:uppercase; font-size:11px; font-weight:600; color: ${pos.mode==='live' ? 'var(--hot-pink)' : 'var(--text-secondary)'}">${pos.mode || 'paper'}</span></td>
                         <td><span style="color: ${pos.status === 'open' ? 'var(--alert-orange)' : pos.status === 'won' ? 'var(--cyber-emerald)' : 'var(--hot-pink)'}; font-weight:600; text-transform:capitalize;">${pos.status}${pos.realized_pnl != null && pos.status !== 'open' ? ' (' + (pos.realized_pnl >= 0 ? '+' : '') + '$' + pos.realized_pnl.toFixed(2) + ')' : ''}</span></td>
                         <td>
-                            ${pos.status === 'open' ? `<button class="btn" style="background:linear-gradient(135deg, var(--hot-pink), #cc005f); padding:4px 8px; font-size:11px;" onclick="exitPositionPrompt('${pos.id}', ${pos.entry_price || 0.5})">Exit</button>` : `<span style="color:var(--text-secondary); font-size:11px;">—</span>`}
+                            ${pos.status === 'open' ? `<button class="btn" style="background:var(--hot-pink); border-color:var(--hot-pink); color:#fff; padding:4px 8px; font-size:11px;" onclick="exitPositionPrompt('${pos.id}', ${pos.entry_price || 0.5})">Exit</button>` : `<span style="color:var(--text-secondary); font-size:11px;">—</span>`}
                         </td>
                     </tr>
                 `).join("");
@@ -2557,7 +2653,7 @@
                         </div>
                         <div class="control-group" style="margin-bottom: 8px;">
                             <span class="param-label">Execution Mode</span>
-                            <select id="mode_${s.key}" class="control-input" onchange="saveStrategyMode('${s.key}', this)" style="background:#1b203c; padding: 6px 10px; font-size: 12px; height: 28px; line-height: 12px; margin-top: 4px;">
+                            <select id="mode_${s.key}" class="control-input" onchange="saveStrategyMode('${s.key}', this)" style="padding: 6px 10px; font-size: 12px; height: 28px; line-height: 12px; margin-top: 4px;">
                                 <option value="manual">Manual (Read Only)</option>
                                 <option value="semi">Semi-Auto (Approval Req)</option>
                                 <option value="auto">Auto (Bot Executes)</option>
@@ -2768,13 +2864,13 @@
                     const h = data.ledger_health;
                     banner.style.display = "block";
                     if (h.valid) {
-                        banner.style.background = "rgba(5, 255, 201, 0.08)";
-                        banner.style.border = "1px solid rgba(5, 255, 201, 0.25)";
+                        banner.style.background = "var(--success-bg)";
+                        banner.style.border = "1px solid var(--cyber-emerald)";
                         banner.style.color = "var(--cyber-emerald)";
                         banner.innerText = `✅ Wallet ledger audit: ${h.status.toUpperCase()} — actual $${h.actual_balance.toFixed(2)} matches expected $${h.expected_balance.toFixed(2)} across ${h.ledger_entries} entries.`;
                     } else {
-                        banner.style.background = "rgba(255, 0, 127, 0.1)";
-                        banner.style.border = "1px solid rgba(255, 0, 127, 0.3)";
+                        banner.style.background = "var(--danger-bg)";
+                        banner.style.border = "1px solid var(--hot-pink)";
                         banner.style.color = "var(--hot-pink)";
                         banner.innerText = `🚨 Wallet ledger DRIFT DETECTED: actual $${h.actual_balance.toFixed(2)} vs expected $${h.expected_balance.toFixed(2)} (drift $${h.drift.toFixed(2)}). Check /api/poly-yield/wallet-health.`;
                     }
@@ -3028,15 +3124,15 @@
                 const maxLossStr = maxLoss < 0 ? `-$${Math.abs(maxLoss).toFixed(2)}` : `$${maxLoss.toFixed(2)}`;
                 
                 return `
-                    <div style="background: rgba(25, 25, 30, 0.6); backdrop-filter: blur(10px); padding: 16px; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; display: flex; flex-direction: column;">
+                    <div style="background: var(--surface); padding: 16px; border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; box-shadow: var(--shadow-sm);">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 12px;">
                             <span style="font-weight:700; font-family:'Space Grotesk', sans-serif; font-size:14px; line-height: 1.3;">${escapeHtml(opp.market_title)}</span>
                             <span class="badge badge-low" style="white-space: nowrap; margin-left: 8px;">${roiStr}% ROI</span>
                         </div>
                         <div style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; flex-grow: 1;">
-                            Top Candidates: <strong style="color:#fff;">${escapeHtml(topCandidates.join(", "))}</strong>
+                            Top Candidates: <strong style="color:var(--text-primary);">${escapeHtml(topCandidates.join(", "))}</strong>
                         </div>
-                        <div style="display:flex; justify-content:space-between; font-size:12px; background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:8px; margin-bottom:16px;">
+                        <div style="display:flex; justify-content:space-between; font-size:12px; background:var(--surface-alt); padding:8px 12px; border-radius:8px; margin-bottom:16px;">
                             <span style="display:flex; flex-direction:column; gap:4px;">
                                 <span>Set Cost: <strong>$${(pSum || 0).toFixed(3)}</strong></span>
                                 <span>Max Loss: <strong style="color:var(--alert-orange);">${maxLossStr}</strong></span>
@@ -3093,7 +3189,7 @@
                 const evals = data.evaluations || {};
                 window.latestEvals = evals;
                 displayEl.innerHTML = `
-                    <div style="font-weight:700; font-family:'Space Grotesk', sans-serif; font-size:14px; margin-bottom:16px; color:#fff;">
+                    <div style="font-weight:700; font-family:'Space Grotesk', sans-serif; font-size:14px; margin-bottom:16px; color:var(--text-primary);">
                         ${escapeHtml(data.market_question)}
                     </div>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
@@ -3104,7 +3200,7 @@
                             const pTail = (ev.p_tail_risk * 100).toFixed(1);
                             const conf = (ev.confidence * 100).toFixed(0);
                             return `
-                                <div class="glass-panel" style="padding:24px; background:rgba(255,255,255,0.02); border:1px solid ${isFallback ? 'rgba(255,159,28,0.3)' : 'rgba(5,255,201,0.2)'}; border-radius: 12px;">
+                                <div class="glass-panel" style="padding:24px; background:var(--surface-alt); border:1px solid ${isFallback ? 'var(--alert-orange)' : 'var(--cyber-emerald)'}; border-radius: 12px;">
                                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                                         <span style="font-weight:700; font-size:13px; text-transform:uppercase;">${prov}</span>
                                         <span class="badge ${isFallback ? 'badge-med' : 'badge-low'}">${isFallback ? 'Fallback' : 'Inferred'}</span>
@@ -3121,7 +3217,7 @@
                                         <span style="color:var(--text-secondary);">Confidence:</span>
                                         <span>${conf}%</span>
                                     </div>
-                                    <div style="font-size:11px; color:var(--text-secondary); background:rgba(0,0,0,0.2); padding:6px 8px; border-radius:6px; font-style:italic;">
+                                    <div style="font-size:11px; color:var(--text-secondary); background:var(--surface); padding:6px 8px; border-radius:6px; font-style:italic; border:1px solid var(--border);">
                                         "${escapeHtml(ev.rationale || '')}"
                                     </div>
                                 </div>
@@ -3210,7 +3306,7 @@
                 const evals = data.evaluations || {};
                 window.latestEvals = evals;
                 displayEl.innerHTML = `
-                    <div style="font-weight:700; font-family:'Space Grotesk', sans-serif; font-size:14px; margin-bottom:16px; color:#fff;">
+                    <div style="font-weight:700; font-family:'Space Grotesk', sans-serif; font-size:14px; margin-bottom:16px; color:var(--text-primary);">
                         ${escapeHtml(data.market_question)}
                     </div>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
@@ -3221,7 +3317,7 @@
                             const pTail = (ev.p_tail_risk * 100).toFixed(1);
                             const conf = (ev.confidence * 100).toFixed(0);
                             return `
-                                <div class="glass-panel" style="padding:14px; background:rgba(255,255,255,0.02); border:1px solid ${isFallback ? 'rgba(255,159,28,0.3)' : 'rgba(5,255,201,0.2)'};">
+                                <div class="glass-panel" style="padding:14px; background:var(--surface-alt); border:1px solid ${isFallback ? 'var(--alert-orange)' : 'var(--cyber-emerald)'};">
                                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                                         <span style="font-weight:700; font-size:13px; text-transform:uppercase;">${prov}</span>
                                         <span class="badge ${isFallback ? 'badge-med' : 'badge-low'}">${isFallback ? 'Fallback' : 'Inferred'}</span>
@@ -3238,7 +3334,7 @@
                                         <span style="color:var(--text-secondary);">Confidence:</span>
                                         <span>${conf}%</span>
                                     </div>
-                                    <div style="font-size:11px; color:var(--text-secondary); background:rgba(0,0,0,0.2); padding:6px 8px; border-radius:6px; font-style:italic;">
+                                    <div style="font-size:11px; color:var(--text-secondary); background:var(--surface); padding:6px 8px; border-radius:6px; font-style:italic; border:1px solid var(--border);">
                                         "${escapeHtml(ev.rationale || '')}"
                                     </div>
                                 </div>
