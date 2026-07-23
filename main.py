@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Dict
+from typing import Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -52,10 +52,10 @@ class ManualTradeArgs(BaseModel):
     outcome: str
     stake_usdc: float
     price: float
-    stop_loss_price: float = None
-    take_profit_price: float = None
-    trailing_stop_pct: float = None
-    token_id: str = None
+    stop_loss_price: Optional[float] = None
+    take_profit_price: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
+    token_id: Optional[str] = None
     market_title: str = "Manual Position"
 
 class ExitArgs(BaseModel):
