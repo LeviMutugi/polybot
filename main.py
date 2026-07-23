@@ -45,7 +45,7 @@ class ConfigUpdate(BaseModel):
 class KeySubmit(BaseModel):
     service: str
     value: str
-    label: str = ""
+    label: Optional[str] = ""
 
 class ManualTradeArgs(BaseModel):
     market_id: str
@@ -56,7 +56,7 @@ class ManualTradeArgs(BaseModel):
     take_profit_price: Optional[float] = None
     trailing_stop_pct: Optional[float] = None
     token_id: Optional[str] = None
-    market_title: str = "Manual Position"
+    market_title: Optional[str] = "Manual Position"
 
 class ExitArgs(BaseModel):
     current_price: float
@@ -402,7 +402,7 @@ async def place_manual_trade(trade: ManualTradeArgs, _=Depends(verify_token)):
         "id": f"opp_manual_{uuid.uuid4().hex[:8]}",
         "strategy": "manual",
         "market_id": trade.market_id,
-        "market_title": trade.market_title,
+        "market_title": trade.market_title or "Manual Position",
         "outcome": trade.outcome,
         "entry_price": trade.price,
         "suggested_usdc": trade.stake_usdc,
@@ -476,22 +476,22 @@ async def wallet_health():
 
 class DutchingAllocateArgs(BaseModel):
     provider: str
-    model_name: str = ""
+    model_name: Optional[str] = ""
     allocated_budget_usdc: float
 
 class DutchingEvaluateArgs(BaseModel):
     market_question: str
-    market_description: str = ""
+    market_description: Optional[str] = ""
     candidates: list
     top_set_names: list
-    providers: list = ["openai", "anthropic", "kimi", "deepseek"]
+    providers: Optional[list] = None  # None -> handler falls back to all 4
 
 class DutchingExecuteArgs(BaseModel):
     opportunity_id: str
-    instance_id: str = ""  # empty = attribute to the mode-scoped manual/consensus instance
-    p_model_top_set: float = 0.90
-    p_tail_risk: float = 0.10
-    confidence: float = 0.80
+    instance_id: Optional[str] = ""  # empty/None = attribute to the mode-scoped manual/consensus instance
+    p_model_top_set: Optional[float] = 0.90
+    p_tail_risk: Optional[float] = 0.10
+    confidence: Optional[float] = 0.80
 
 _DUTCHING_DEFAULT_MODELS = {
     "openai": "gpt-4o",
@@ -579,7 +579,8 @@ async def evaluate_dutching_market(args: DutchingEvaluateArgs, _=Depends(verify_
             top_set_names=args.top_set_names
         )
 
-    tasks = [_eval_one(p) for p in args.providers]
+    providers = args.providers or ["openai", "anthropic", "kimi", "deepseek"]
+    tasks = [_eval_one(p) for p in providers]
     eval_outs = await asyncio.gather(*tasks, return_exceptions=True)
     
     for item in eval_outs:
@@ -623,8 +624,9 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
     # from a "Trade This Read" click, or the mode-scoped manual/consensus bucket for
     # a plain Quick Trade. Deterministic ids (not random) so repeated trades always
     # attribute to the SAME row instead of scattering across orphaned instances.
-    is_manual_bucket = not args.instance_id.strip()
-    instance_id = args.instance_id.strip() if not is_manual_bucket else f"inst_manual_{mode}"
+    requested_instance_id = (args.instance_id or "").strip()
+    is_manual_bucket = not requested_instance_id
+    instance_id = requested_instance_id if not is_manual_bucket else f"inst_manual_{mode}"
     with _sqlite_lock:
         row = conn.execute(
             "SELECT * FROM poly_yield_opportunities WHERE id = ?", [args.opportunity_id]
@@ -681,9 +683,11 @@ async def execute_dutching_trade(args: DutchingExecuteArgs, _=Depends(verify_tok
             [
                 trade_id, instance_id, opp.get("market_id"), opp.get("market_title"),
                 json.dumps([l.get("outcome") for l in legs]),
-                sum_market_price, sum_fill_price, args.p_model_top_set,
-                args.p_tail_risk, args.confidence, stake_usdc,
-                json.dumps(legs), mode, position_id
+                sum_market_price, sum_fill_price,
+                args.p_model_top_set if args.p_model_top_set is not None else 0.90,
+                args.p_tail_risk if args.p_tail_risk is not None else 0.10,
+                args.confidence if args.confidence is not None else 0.80,
+                stake_usdc, json.dumps(legs), mode, position_id
             ]
         )
         # Ensure the arena instance row exists — the manual/consensus bucket is never
