@@ -123,14 +123,16 @@ wallet private key. Both are now untracked and ignored.
 
 ## 4. Test coverage
 
-`tests/` now has **89 passing tests**. Beyond the original regression tests (book
+`tests/` now has **95 passing tests**. Beyond the original regression tests (book
 normalization, VWAP walking, fillability guard, APY bounds, Kelly unit sanitization,
 allocation caps, staleness rejection/marking, manual-mode rejection, definitive-winner
 settlement, full paper-trade wallet conservation, and exit price validation), there
 are 19 tests covering every S9-S19 strategy's core logic plus the S5/S3 fixes
-(`tests/test_new_strategies.py`), and 9 more covering full-catalog pagination,
-S20's unfillable-leg flagging, and the engine's auto-exec eligibility filter
-(`tests/test_market_coverage_and_safety.py`).
+(`tests/test_new_strategies.py`), 9 covering full-catalog pagination, S20's
+unfillable-leg flagging, and the engine's auto-exec eligibility filter
+(`tests/test_market_coverage_and_safety.py`), and 6 covering the manual multi-leg
+basket trade endpoint — validation errors and a full paper-mode execution proving
+proportional (equal-shares) sizing across legs (`tests/test_manual_basket_trade.py`).
 
 **Test harness fix:** `pytest-asyncio` was never declared anywhere (not in
 `requirements.txt`, no `pytest.ini`/`conftest.py` setting `asyncio_mode`), so every
@@ -233,7 +235,33 @@ fixed, and the fixes generalize to every strategy, not just Dutching:
   `poly_yield.scan_interval_s`, raise the interval before shrinking page
   coverage back down.
 
-## 7. What still remains (honest assessment)
+## 7. Manual multi-leg / Dutching-style basket trades
+
+Previously the *only* way to place a Dutching-style "spread stake across several
+picks for a uniform payout if any one hits" trade was to wait for S20 to scan and
+surface it — the generic Manual Trade panel only ever supported a single outcome,
+so a user who wanted to build that kind of basket from candidates *they* picked
+(not ones the bot had already found) had no way to do it.
+
+Added `POST /api/poly-yield/manual-basket-trade` (`main.py`): takes N
+user-specified legs (market_id/token_id/outcome/price) and a total stake, does not
+reimplement any sizing math itself — it hands the legs straight to the exact same
+`execute_opportunity()` → `_execute_multi_leg()` pipeline every multi-leg strategy
+(S3, S5, S17, S18, S20) already uses, so it gets proportional-by-price sizing, the
+live per-leg order-book pre-flight, and partial-fill rollback/killswitch for free.
+Defaults to the conservative `conditional_multi_leg` payoff assumption (a covered
+subset can still lose if none of it hits) unless the user explicitly flags the set
+as `guaranteed_arb` (every possible outcome covered).
+
+The dashboard's Manual Trade panel now has a **Single Outcome** / **Multi-Leg
+Basket** toggle. Basket mode: dynamic add/remove leg rows (minimum 2), a live
+JS-computed sizing preview (set price, per-leg dollar amount, edge %) that updates
+on every keystroke without needing a server round-trip, and a "covers every
+outcome" checkbox. Verified in a real running instance via headless-browser
+click-through (toggle, add/remove rows, live math correctness), not just unit
+tests.
+
+## 8. What still remains (honest assessment)
 
 These are **not** hidden logic bugs — they are the risks you said you accept, plus
 known limitations that fail safe (produce nothing rather than something wrong):
@@ -263,7 +291,7 @@ known limitations that fail safe (produce nothing rather than something wrong):
 6. **Single-process SQLite + in-memory market locks** — correct for one bot instance.
    Do **not** run two instances against the same database.
 
-## 8. Go-live checklist (recommended order)
+## 9. Go-live checklist (recommended order)
 
 1. **Generate a fresh wallet** (the old key material was in git — see §1.8). Fund
    with USDC + a few POL for gas. Store the key via the UI (never in git/env files).
