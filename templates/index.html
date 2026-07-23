@@ -2756,17 +2756,124 @@
                     { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
                 ]
             },
-            { key: 's9_stablecoin_peg', label: 'S9 Stablecoin Peg Arb', params: [] },
-            { key: 's10_oracle', label: 'S10 Oracle Discrepancy', params: [] },
-            { key: 's11_overreaction', label: 'S11 Overreaction Scalp', params: [] },
-            { key: 's12_momentum', label: 'S12 Trend Momentum', params: [] },
-            { key: 's13_sentiment', label: 'S13 Sentiment Tracker', params: [] },
-            { key: 's14_macro_corr', label: 'S14 Macro Correlation', params: [] },
-            { key: 's15_theta', label: 'S15 Theta Harvester', params: [] },
-            { key: 's16_poll_drift', label: 'S16 Poll Drift', params: [] },
-            { key: 's17_sniper', label: 'S17 Liquidity Sniper', params: [] },
-            { key: 's18_straddle', label: 'S18 Catalyst Straddle', params: [] },
-            { key: 's19_longshot_yes', label: 'S19 Longshot YES', params: [] },
+            {
+                key: 's9_stablecoin_peg',
+                label: 'S9 Stablecoin Peg Arb',
+                params: [
+                    { key: 'min_price', label: 'Min Price', type: 'number', step: '0.005', unit: 'USDC' },
+                    { key: 'max_days_left', label: 'Max Days Left', type: 'number', step: '1', unit: 'days' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's10_oracle',
+                label: 'S10 Oracle Discrepancy',
+                note: 'Buys markets whose end date has passed but Gamma hasn\'t formally closed/settled them yet (UMA lag) — not a live sports/news feed.',
+                params: [
+                    { key: 'min_price', label: 'Min Price', type: 'number', step: '0.005', unit: 'USDC' },
+                    { key: 'max_days_past_expiry', label: 'Max Days Past Expiry', type: 'number', step: '1', unit: 'days' },
+                    { key: 'assumed_settlement_days', label: 'Assumed Settlement Wait', type: 'number', step: '0.5', unit: 'days' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's11_overreaction',
+                label: 'S11 Overreaction Scalp',
+                note: 'Signal comes from this bot\'s own rolling price samples (in-process, resets on restart), not an external tick feed.',
+                params: [
+                    { key: 'spike_threshold_pct', label: 'Spike Threshold', type: 'number', step: '0.5', unit: '%' },
+                    { key: 'lookback_s', label: 'Lookback', type: 'number', step: '60', unit: 'sec' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's12_momentum',
+                label: 'S12 Trend Momentum',
+                note: 'Signal comes from this bot\'s own rolling price samples (in-process, resets on restart), not an external tick feed.',
+                params: [
+                    { key: 'trend_threshold_pct', label: 'Trend Threshold', type: 'number', step: '0.5', unit: '%' },
+                    { key: 'lookback_s', label: 'Lookback', type: 'number', step: '60', unit: 'sec' },
+                    { key: 'min_samples', label: 'Min Samples', type: 'number', step: '1', unit: 'cnt' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's13_sentiment',
+                label: 'S13 Sentiment Tracker',
+                note: 'PROXY only (order-flow book imbalance + price momentum) — not real news/social sentiment. 🔜 Coming soon: true multi-source sentiment via GDELT + other signals.',
+                params: [
+                    { key: 'lookback_s', label: 'Lookback', type: 'number', step: '60', unit: 'sec' },
+                    { key: 'score_threshold', label: 'Score Threshold', type: 'number', step: '0.05', unit: '(-1..1)' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's14_macro_corr',
+                label: 'S14 Macro Correlation',
+                note: 'Intra-platform PROXY: trades user-curated correlated Polymarket pairs only (config key s14_macro_corr.correlation_pairs) — not real macro/economic index data. No signals until pairs are curated.',
+                params: [
+                    { key: 'min_gap_pct', label: 'Min Gap', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's15_theta',
+                label: 'S15 Theta Harvester',
+                params: [
+                    { key: 'min_yes_price', label: 'Min YES Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'max_yes_price', label: 'Max YES Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'min_days_left', label: 'Min Days Left', type: 'number', step: '1', unit: 'days' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's16_poll_drift',
+                label: 'S16 Poll Drift',
+                note: 'PROXY: election-market price trend, not a real polling-aggregator feed (538/RCP etc.).',
+                params: [
+                    { key: 'trend_threshold_pct', label: 'Trend Threshold', type: 'number', step: '0.5', unit: '%' },
+                    { key: 'lookback_s', label: 'Lookback', type: 'number', step: '300', unit: 'sec' },
+                    { key: 'min_samples', label: 'Min Samples', type: 'number', step: '1', unit: 'cnt' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's17_sniper',
+                label: 'S17 Liquidity Sniper',
+                params: [
+                    { key: 'min_profit_pct', label: 'Min Profit', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's18_straddle',
+                label: 'S18 Catalyst Straddle',
+                note: 'Entry only — the payoff requires manually exiting the winning leg after a catalyst resolves the uncertainty, not holding to resolution.',
+                params: [
+                    { key: 'min_leg_price', label: 'Min Leg Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'max_leg_price', label: 'Max Leg Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'max_cost_ratio', label: 'Max Cost Ratio', type: 'number', step: '0.01', unit: 'x' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's19_longshot_yes',
+                label: 'S19 Longshot YES',
+                note: 'Deliberate negative-EV tail bets (opposite side of S1/S6) — sized tiny on purpose, with its own total-exposure cap.',
+                params: [
+                    { key: 'max_yes_price', label: 'Max YES Price', type: 'number', step: '0.001', unit: 'USDC' },
+                    { key: 'max_positions', label: 'Max Positions', type: 'number', step: '1', unit: 'cnt' },
+                    { key: 'position_pct', label: 'Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'max_total_allocation_pct', label: 'Max Total Allocation', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
             {
                 key: 's20_dutching',
                 label: 'S20 Top-N Dutching',
@@ -2814,6 +2921,10 @@
                     `;
                 }).join("");
                 
+                const noteHtml = s.note
+                    ? `<div class="strategy-card-note" style="font-size:11px; line-height:1.4; color:var(--text-secondary); background:var(--surface-alt); border-left:2px solid var(--alert-orange); padding:6px 8px; margin-bottom:8px; border-radius:4px;">${s.note}</div>`
+                    : '';
+
                 return `
                     <div class="strategy-card">
                         <div class="strategy-card-header">
@@ -2823,6 +2934,7 @@
                                 <span class="slider" style="border-radius:20px;"></span>
                             </label>
                         </div>
+                        ${noteHtml}
                         <div class="control-group" style="margin-bottom: 8px;">
                             <span class="param-label">Execution Mode</span>
                             <select id="mode_${s.key}" class="control-input" onchange="saveStrategyMode('${s.key}', this)" style="padding: 6px 10px; font-size: 12px; height: 28px; line-height: 12px; margin-top: 4px;">
