@@ -2049,11 +2049,32 @@
         function autofillFromIdx(idx, event) {
             const opp = renderedOpps[idx];
             if (!opp) return;
-            autofillManualTrade(opp.market_id || '', opp.token_id || '', opp.market_title || '', opp.outcome || 'YES', opp.entry_price || 0.50, event);
+
+            if (Array.isArray(opp.legs) && opp.legs.length > 0) {
+                autofillBasketTrade(opp, event);
+            } else {
+                autofillManualTrade(opp.market_id || '', opp.token_id || '', opp.market_title || '', opp.outcome || 'YES', opp.entry_price || 0.50, event);
+            }
+        }
+
+        function highlightManualPanel(anchorElId) {
+            const anchorEl = document.getElementById(anchorElId);
+            const manualPanel = anchorEl ? anchorEl.closest(".glass-panel") : null;
+            if (manualPanel) {
+                manualPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+                manualPanel.style.borderColor = "var(--cyber-emerald)";
+                manualPanel.style.boxShadow = "0 0 0 3px var(--accent-soft)";
+                setTimeout(() => {
+                    manualPanel.style.borderColor = "";
+                    manualPanel.style.boxShadow = "";
+                }, 2000);
+            }
         }
 
         function autofillManualTrade(marketId, tokenId, marketTitle, outcome, price, event) {
             event.stopPropagation();
+
+            switchManualTradeMode('single');
 
             document.getElementById("manualMarketId").value = marketId;
             document.getElementById("manualTokenId").value = tokenId && tokenId !== 'None' ? tokenId : '';
@@ -2070,19 +2091,46 @@
             }
 
             document.getElementById("manualPrice").value = price || 0.50;
-            
+
             logEvent(`[SYSTEM] Auto-filled manual trade form for: "${marketTitle}"`);
-            
-            const manualPanel = document.getElementById("manualMarketId").closest(".glass-panel");
-            if (manualPanel) {
-                manualPanel.scrollIntoView({ behavior: "smooth", block: "center" });
-                manualPanel.style.borderColor = "var(--cyber-emerald)";
-                manualPanel.style.boxShadow = "0 0 0 3px var(--accent-soft)";
-                setTimeout(() => {
-                    manualPanel.style.borderColor = "";
-                    manualPanel.style.boxShadow = "";
-                }, 2000);
+            highlightManualPanel("manualMarketId");
+        }
+
+        // Autofills the Multi-Leg Basket form from a scanned multileg opportunity
+        // (S3/S5/S17/S18/S20 etc.) — these carry their real per-leg tradeable data
+        // in opp.legs; the top-level opp.market_id/outcome/entry_price are
+        // aggregates (event id, human-readable summary, sum-of-leg-prices) and are
+        // not valid inputs for the single-outcome form.
+        function autofillBasketTrade(opp, event) {
+            event.stopPropagation();
+
+            switchManualTradeMode('basket');
+
+            document.getElementById("basketMarketTitle").value = opp.market_title || "Manual Basket Trade";
+
+            basketLegs = opp.legs.map((leg, i) => ({
+                market_id: leg.market_id || '',
+                token_id: (leg.token_id && leg.token_id !== 'None') ? leg.token_id : '',
+                outcome: leg.outcome || `Candidate ${i + 1}`,
+                price: Number(leg.price) || 0
+            }));
+
+            const totalStakeInput = document.getElementById("basketTotalStake");
+            if (totalStakeInput) {
+                const fallbackStake = opp.legs.reduce((acc, l) => acc + (Number(l.stake_usdc) || 0), 0);
+                totalStakeInput.value = Number(opp.suggested_usdc) || fallbackStake || totalStakeInput.value;
             }
+
+            const guaranteedArbInput = document.getElementById("basketGuaranteedArb");
+            if (guaranteedArbInput) {
+                guaranteedArbInput.checked = opp.payoff_type === 'guaranteed_arb';
+            }
+
+            renderBasketLegRows();
+            updateBasketPreview();
+
+            logEvent(`[SYSTEM] Auto-filled ${basketLegs.length}-leg basket trade form for: "${opp.market_title || ''}"`);
+            highlightManualPanel("basketMarketTitle");
         }
 
         // Fetch Active Portfolio Positions
