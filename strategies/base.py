@@ -4,8 +4,10 @@ Provides the BaseStrategy class and shared utility functions (VWAP order book wa
 """
 import json
 import logging
+import time
+from collections import deque
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import httpx
 from config import settings
 
@@ -208,6 +210,66 @@ def calculate_compounding_apy(net_yield: float, days: float) -> float:
         return float(min(apy * 100.0, APY_CAP_PCT)) # Convert to percentage, capped
     except OverflowError:
         return APY_CAP_PCT
+
+# --- In-process rolling price history (for momentum/reversal/trend strategies) ---
+#
+# There is no external time-series/tick-data feed wired into this bot — Gamma and
+# the CLOB only ever expose a single current snapshot. Strategies that need a
+# notion of "price moved X% recently" (S11 overreaction, S12 momentum, S13
+# sentiment proxy, S16 poll-drift proxy) build their own time series by sampling
+# once per scan interval and recording it here, keyed by a caller-chosen
+# series_key (e.g. f"{strategy_key}:{market_id}"). This is real, bot-observed
+# price data — not fabricated — but it means:
+#   - history resets to empty on process restart;
+#   - a market needs a short warm-up (a few scan intervals) before any
+#     lookback-based signal can fire, since there's nothing to compare against yet.
+_PRICE_HISTORY_MAXLEN = 60
+_price_history: Dict[str, deque] = {}
+
+def record_price_sample(series_key: str, price: float, max_len: int = _PRICE_HISTORY_MAXLEN) -> List[Tuple[float, float]]:
+    """Append a (unix_timestamp, price) sample and return the full history so far
+    (oldest first)."""
+    dq = _price_history.get(series_key)
+    if dq is None:
+        dq = deque(maxlen=max_len)
+        _price_history[series_key] = dq
+    dq.append((time.time(), price))
+    return list(dq)
+
+def price_change_pct(history: List[Tuple[float, float]], lookback_s: float) -> Optional[float]:
+    """Signed percentage change between the latest sample and the oldest sample
+    still within lookback_s seconds of it. None during warm-up (not enough history
+    yet to find a baseline that old)."""
+    if len(history) < 2:
+        return None
+    latest_ts, latest_price = history[-1]
+    baseline = None
+    for ts, price in history:
+        if latest_ts - ts <= lookback_s:
+            baseline = price
+            break
+    if baseline is None or baseline <= 0:
+        return None
+    return (latest_price - baseline) / baseline * 100.0
+
+def monotonic_trend(history: List[Tuple[float, float]], lookback_s: float, min_samples: int = 3) -> Optional[str]:
+    """'up' if every sample within lookback_s is non-decreasing (net change > 0),
+    'down' if non-increasing (net change < 0), else None — including when there
+    aren't yet enough samples within the window to judge a sustained trend."""
+    if len(history) < min_samples:
+        return None
+    latest_ts = history[-1][0]
+    window = [p for ts, p in history if latest_ts - ts <= lookback_s]
+    if len(window) < min_samples:
+        return None
+    non_decreasing = all(b >= a - 1e-9 for a, b in zip(window, window[1:]))
+    non_increasing = all(b <= a + 1e-9 for a, b in zip(window, window[1:]))
+    if non_decreasing and window[-1] > window[0]:
+        return "up"
+    if non_increasing and window[-1] < window[0]:
+        return "down"
+    return None
+
 
 def calculate_simple_apy(net_yield_pct: float, days: float) -> float:
     """
