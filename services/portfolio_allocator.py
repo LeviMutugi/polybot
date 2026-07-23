@@ -188,7 +188,7 @@ class PortfolioAllocator:
                 max_pos_pct = await cfg.get_typed(f"{strategy_key}.max_position_pct", float, 0.05)
                 allocated_usdc = total_balance * max_pos_pct
             # Never allocate more than the strategy suggested for this opportunity
-            if suggested_usdc and suggested_usdc > 0:
+            if suggested_usdc is not None and suggested_usdc >= 0:
                 allocated_usdc = min(allocated_usdc, suggested_usdc)
 
         # Clip allocation to available room inside drawdown limits
