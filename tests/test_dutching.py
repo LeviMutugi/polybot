@@ -130,6 +130,7 @@ async def test_dutching_execute_respects_exec_mode_and_debits_paper_wallet(monke
     records a real position with legs/payoff_type, and links a dutching_trades
     metadata row to that position for the arena leaderboard."""
     import strategies.base as base_mod
+    import strategies.engine as engine_mod
     from fastapi import HTTPException
     from strategies.engine import poly_yield_engine
     from db.database import get_sqlite, _sqlite_lock
@@ -140,6 +141,11 @@ async def test_dutching_execute_respects_exec_mode_and_debits_paper_wallet(monke
         return {"price": prices.get(token_id, 0.5), "slippage": 0.0}
 
     monkeypatch.setattr(base_mod, "calculate_execution_price", mock_calc_price)
+
+    # Deterministic simulated gas fee — pin it so the balance-conservation assertion
+    # below isn't at the mercy of live gas/MATIC price lookups.
+    async def mock_gas(): return 0.01
+    monkeypatch.setattr(engine_mod.gas_tracker, "get_gas_cost_usdc", mock_gas)
 
     opp = {
         "id": "opp_dutch_test1",
@@ -179,7 +185,8 @@ async def test_dutching_execute_respects_exec_mode_and_debits_paper_wallet(monke
     assert result["status"] == "executed"
     assert result["position_id"]
     assert result["stake_usdc"] > 0
-    assert result["new_balance"] == pytest.approx(balance_before - result["stake_usdc"])
+    # Basket execution debits the stake plus a simulated gas fee per leg (2 legs here)
+    assert result["new_balance"] == pytest.approx(balance_before - result["stake_usdc"] - 0.02)
 
     conn = get_sqlite()
     with _sqlite_lock:
@@ -196,4 +203,5 @@ async def test_dutching_execute_respects_exec_mode_and_debits_paper_wallet(monke
     assert pos["legs"] is not None
     assert pos["mode"] == "paper"
     assert trade is not None
-    assert trade["instance_id"] == "inst_manual_1"
+    # Manual/consensus bucket instance id is mode-scoped: inst_manual_{mode}
+    assert trade["instance_id"] == "inst_manual_paper"
