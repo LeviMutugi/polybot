@@ -238,6 +238,15 @@ def init_db():
             ("dutching_trades", "position_id", "TEXT"),
             ("poly_yield_opportunities", "p_sum", "REAL"),
             ("dutching_arena_instances", "mode", "TEXT DEFAULT 'paper'"),
+            # 1 = fillable at scan time (default — every existing strategy already
+            # skips unfillable legs entirely rather than surfacing them), 0 = a
+            # strategy deliberately still surfaced this opportunity for visibility
+            # even though a leg failed the live-book fillability check (S20 Dutching
+            # does this so a thin-liquidity market doesn't just silently vanish from
+            # the UI). The engine's auto-exec loop excludes fillable=0 rows so it
+            # never repeatedly attempts — and fails — an execution already known bad.
+            ("poly_yield_opportunities", "fillable", "INTEGER DEFAULT 1"),
+            ("poly_yield_opportunities", "unfillable_reason", "TEXT"),
         ]
         for table_name, col_name, col_type in migration_cols:
             try:
@@ -255,6 +264,17 @@ def init_db():
             ("poly_yield.enabled", "true"),
             ("poly_yield.auto_exec_drawdown_limit", "50.0"),
             ("poly_yield.max_slippage_pct", "1.5"),
+            # Full-catalog market/event pagination (Gamma offset/limit paging) — every
+            # strategy scans the whole active catalog now, not a single capped page.
+            # max_pages=0 means unlimited; the delay between pages is a self-imposed
+            # rate-limit courtesy since this bot has no visibility into Polymarket's
+            # exact published limit.
+            ("poly_yield.market_fetch_page_size", "500"),
+            ("poly_yield.market_fetch_max_pages", "0"),
+            ("poly_yield.market_fetch_delay_s", "0.2"),
+            ("s20_dutching.event_fetch_page_size", "100"),
+            ("s20_dutching.event_fetch_max_pages", "0"),
+            ("s20_dutching.event_fetch_delay_s", "0.2"),
             # Strategy switches
             ("s1_novelty.enabled", "true"),
             ("s2_split.enabled", "true"),

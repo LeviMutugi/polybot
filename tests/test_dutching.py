@@ -54,10 +54,18 @@ async def test_dutching_strategy_scan(monkeypatch):
     }
 
     class MockResponse:
+        status_code = 200
         def json(self):
             return [mock_event]
 
     async def mock_get(url, params=None):
+        # Second page (offset=100) is empty — signals pagination is done.
+        if (params or {}).get("offset", 0) > 0:
+            class EmptyResponse:
+                status_code = 200
+                def json(self):
+                    return []
+            return EmptyResponse()
         return MockResponse()
 
     async def mock_calc_price(token_id, amount_usdc, side="buy", http_client=None):

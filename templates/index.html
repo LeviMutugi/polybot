@@ -906,50 +906,84 @@
             <!-- Manual Trade Panel -->
             <div class="glass-panel">
                 <div class="panel-title">MANUAL TRADE</div>
-                <div class="control-group">
-                    <label class="control-label">Market ID</label>
-                    <input type="text" id="manualMarketId" class="control-input" placeholder="e.g. 0x... or slug">
+                <div style="display:flex; gap:6px; margin-bottom:14px;">
+                    <button class="btn" id="manualModeBtnSingle" onclick="switchManualTradeMode('single')" style="flex:1; justify-content:center; padding:8px; font-size:11px;">Single Outcome</button>
+                    <button class="btn" id="manualModeBtnBasket" onclick="switchManualTradeMode('basket')" style="flex:1; justify-content:center; padding:8px; font-size:11px;">Multi-Leg Basket</button>
                 </div>
-                <div class="control-group">
-                    <label class="control-label">Token ID</label>
-                    <input type="text" id="manualTokenId" class="control-input" placeholder="CLOB Token ID (optional)">
-                </div>
-                <div class="control-group">
-                    <label class="control-label">Market Title</label>
-                    <input type="text" id="manualMarketTitle" class="control-input" value="Manual Trade">
-                </div>
-                <div class="grid-2" style="gap:10px;">
+
+                <!-- Single Outcome form -->
+                <div id="manualSingleForm">
                     <div class="control-group">
-                        <label class="control-label">Outcome</label>
-                        <select id="manualOutcome" class="control-input">
-                            <option value="YES">YES</option>
-                            <option value="NO">NO</option>
-                        </select>
+                        <label class="control-label">Market ID</label>
+                        <input type="text" id="manualMarketId" class="control-input" placeholder="e.g. 0x... or slug">
                     </div>
                     <div class="control-group">
-                        <label class="control-label">Price ($)</label>
-                        <input type="number" id="manualPrice" class="control-input" step="0.01" min="0.01" max="0.99" value="0.50">
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label class="control-label">Stake (USDC)</label>
-                    <input type="number" id="manualStake" class="control-input" min="1" value="10">
-                </div>
-                <div class="grid-2" style="gap:10px;">
-                    <div class="control-group">
-                        <label class="control-label">Stop Loss ($)</label>
-                        <input type="number" id="manualSL" class="control-input" step="0.01" placeholder="e.g. 0.45">
+                        <label class="control-label">Token ID</label>
+                        <input type="text" id="manualTokenId" class="control-input" placeholder="CLOB Token ID (optional)">
                     </div>
                     <div class="control-group">
-                        <label class="control-label">Take Profit ($)</label>
-                        <input type="number" id="manualTP" class="control-input" step="0.01" placeholder="e.g. 0.85">
+                        <label class="control-label">Market Title</label>
+                        <input type="text" id="manualMarketTitle" class="control-input" value="Manual Trade">
                     </div>
+                    <div class="grid-2" style="gap:10px;">
+                        <div class="control-group">
+                            <label class="control-label">Outcome</label>
+                            <select id="manualOutcome" class="control-input">
+                                <option value="YES">YES</option>
+                                <option value="NO">NO</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">Price ($)</label>
+                            <input type="number" id="manualPrice" class="control-input" step="0.01" min="0.01" max="0.99" value="0.50">
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label class="control-label">Stake (USDC)</label>
+                        <input type="number" id="manualStake" class="control-input" min="1" value="10">
+                    </div>
+                    <div class="grid-2" style="gap:10px;">
+                        <div class="control-group">
+                            <label class="control-label">Stop Loss ($)</label>
+                            <input type="number" id="manualSL" class="control-input" step="0.01" placeholder="e.g. 0.45">
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">Take Profit ($)</label>
+                            <input type="number" id="manualTP" class="control-input" step="0.01" placeholder="e.g. 0.85">
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label class="control-label">Trailing Stop (%)</label>
+                        <input type="number" id="manualTS" class="control-input" placeholder="e.g. 10">
+                    </div>
+                    <button class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:10px;" onclick="placeManualTrade()">Submit Manual Trade</button>
                 </div>
-                <div class="control-group">
-                    <label class="control-label">Trailing Stop (%)</label>
-                    <input type="number" id="manualTS" class="control-input" placeholder="e.g. 10">
+
+                <!-- Multi-Leg Basket (Dutching-style) form -->
+                <div id="manualBasketForm" style="display:none;">
+                    <div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px; line-height:1.5;">
+                        Spread one stake across several picks you choose yourself — sized
+                        proportionally to price so the payout is uniform if any one covered
+                        leg wins (the same math S20 Dutching uses, just for candidates you
+                        pick rather than ones the bot already scanned).
+                    </div>
+                    <div class="control-group">
+                        <label class="control-label">Basket Title</label>
+                        <input type="text" id="basketMarketTitle" class="control-input" value="Manual Basket Trade">
+                    </div>
+                    <div id="basketLegsContainer"><!-- populated by renderBasketLegRows() --></div>
+                    <button class="btn" style="width:100%; justify-content:center; margin:8px 0;" onclick="addBasketLeg()">+ Add Leg</button>
+                    <div class="control-group">
+                        <label class="control-label">Total Stake (USDC)</label>
+                        <input type="number" id="basketTotalStake" class="control-input" min="1" value="10" oninput="updateBasketPreview()">
+                    </div>
+                    <div class="control-group" style="display:flex; align-items:center; gap:8px; flex-direction:row;">
+                        <input type="checkbox" id="basketGuaranteedArb" style="width:auto;" onchange="updateBasketPreview()">
+                        <label class="control-label" style="margin:0;" for="basketGuaranteedArb">This set covers every possible outcome (guaranteed arbitrage)</label>
+                    </div>
+                    <div id="basketPreview" style="font-size:11px; background:var(--surface-alt); border-radius:8px; padding:10px 12px; margin:10px 0; line-height:1.6;"></div>
+                    <button class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:6px;" onclick="placeManualBasketTrade()">Submit Basket Trade</button>
                 </div>
-                <button class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:10px;" onclick="placeManualTrade()">Submit Manual Trade</button>
             </div>
         </div>
 
@@ -1904,14 +1938,25 @@
                     sizeText += ` <br><span style="font-size:10px; color:var(--text-secondary);">(${pct}%)</span>`;
                 }
                 const isManual = opp.exec_mode === 'manual';
+                // fillable defaults true (INTEGER DEFAULT 1 in the DB) — a strategy only
+                // sets it to 0 when it deliberately still surfaces an opportunity it
+                // already knows failed the live-book fillability check (e.g. S20
+                // Dutching, for visibility), rather than silently skipping it like most
+                // strategies do.
+                const isUnfillable = opp.fillable === 0 || opp.fillable === false;
+                const unfillableTag = isUnfillable
+                    ? `<br><span class="badge" style="background:var(--warning-bg,rgba(255,140,0,0.15)); color:var(--alert-orange); font-size:10px; margin-top:4px; display:inline-block;" title="${escapeHtml(opp.unfillable_reason || 'One or more legs failed the live order-book fillability check at scan time.')}">⚠️ Unfillable</span>`
+                    : '';
                 // NOTE: all interactive handlers are index-based lookups into renderedOpps —
                 // inlining titles/ids into onclick attributes breaks on quotes/apostrophes.
-                const execBtn = isManual
+                const execBtn = isUnfillable
+                    ? `<button class="btn" disabled title="${escapeHtml(opp.unfillable_reason || 'Not fillable at scan time — liquidity or slippage failed the pre-flight check.')}" style="padding:6px 12px; font-size:11px; opacity:0.45; cursor:not-allowed;">Unfillable</button>`
+                    : isManual
                     ? `<button class="btn" disabled title="This strategy is in MANUAL mode: follow the instructions, or switch it to semi/auto in the Bot Strategy Manager." style="padding:6px 12px; font-size:11px; opacity:0.45; cursor:not-allowed;">Manual Only</button>`
                     : `<button class="btn btn-emerald" id="exec_${idx}" onclick="executeTradeByIdx(${idx}, event)" style="padding:6px 12px; font-size:11px;">Execute</button>`;
                 return `
                     <tr onclick="toggleOppDetailsByIdx(${idx})" style="cursor:pointer;">
-                        <td><span class="badge ${getRiskBadge(opp.risk_level)}">${formatStrategyName(opp.strategy)}</span></td>
+                        <td><span class="badge ${getRiskBadge(opp.risk_level)}">${formatStrategyName(opp.strategy)}</span>${unfillableTag}</td>
                         <td style="max-width:300px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(opp.market_title || '')}">${escapeHtml(opp.market_title || '')}</td>
                         <td><span style="color:var(--cyber-emerald); font-weight:600;">${escapeHtml(opp.outcome || '')}</span></td>
                         <td>${opp.implied_prob != null ? opp.implied_prob + '%' : 'N/A'}</td>
@@ -2600,6 +2645,164 @@
             }
         }
 
+        // ---------------------------------------------------------------------
+        // Manual Multi-Leg / Dutching-style Basket Trade
+        // ---------------------------------------------------------------------
+        let basketLegs = [
+            { market_id: "", token_id: "", outcome: "Candidate A", price: 0.40 },
+            { market_id: "", token_id: "", outcome: "Candidate B", price: 0.30 },
+        ];
+
+        function switchManualTradeMode(mode) {
+            const isBasket = mode === "basket";
+            document.getElementById("manualSingleForm").style.display = isBasket ? "none" : "block";
+            document.getElementById("manualBasketForm").style.display = isBasket ? "block" : "none";
+            document.getElementById("manualModeBtnSingle").classList.toggle("btn-emerald", !isBasket);
+            document.getElementById("manualModeBtnBasket").classList.toggle("btn-emerald", isBasket);
+            if (isBasket) {
+                renderBasketLegRows();
+            }
+        }
+
+        function renderBasketLegRows() {
+            const container = document.getElementById("basketLegsContainer");
+            if (!container) return;
+            container.innerHTML = basketLegs.map((leg, idx) => `
+                <div style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px; background:var(--surface-alt);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-size:11px; font-weight:600; color:var(--text-secondary);">Leg ${idx + 1}</span>
+                        ${basketLegs.length > 2 ? `<button class="btn" style="padding:2px 8px; font-size:10px; background:var(--hot-pink); color:#fff;" onclick="removeBasketLeg(${idx})">Remove</button>` : ''}
+                    </div>
+                    <div class="grid-2" style="gap:6px; margin-bottom:6px;">
+                        <input type="text" class="control-input" placeholder="Market ID" value="${escapeHtml(leg.market_id)}" style="font-size:11px; padding:6px 8px;" oninput="updateBasketLegField(${idx}, 'market_id', this.value)">
+                        <input type="text" class="control-input" placeholder="Token ID" value="${escapeHtml(leg.token_id)}" style="font-size:11px; padding:6px 8px;" oninput="updateBasketLegField(${idx}, 'token_id', this.value)">
+                    </div>
+                    <div class="grid-2" style="gap:6px;">
+                        <input type="text" class="control-input" placeholder="Outcome label" value="${escapeHtml(leg.outcome)}" style="font-size:11px; padding:6px 8px;" oninput="updateBasketLegField(${idx}, 'outcome', this.value)">
+                        <input type="number" class="control-input" placeholder="Price" step="0.01" min="0.01" max="0.99" value="${leg.price}" style="font-size:11px; padding:6px 8px;" oninput="updateBasketLegField(${idx}, 'price', parseFloat(this.value) || 0)">
+                    </div>
+                </div>
+            `).join("");
+            updateBasketPreview();
+        }
+
+        function addBasketLeg() {
+            if (basketLegs.length >= 10) {
+                CustomDialog.alert("Maximum 10 legs per basket.", "Limit Reached", "⚠️");
+                return;
+            }
+            basketLegs.push({ market_id: "", token_id: "", outcome: `Candidate ${basketLegs.length + 1}`, price: 0.10 });
+            renderBasketLegRows();
+        }
+
+        function removeBasketLeg(idx) {
+            if (basketLegs.length <= 2) return; // a basket needs at least 2 legs
+            basketLegs.splice(idx, 1);
+            renderBasketLegRows();
+        }
+
+        function updateBasketLegField(idx, field, value) {
+            if (!basketLegs[idx]) return;
+            basketLegs[idx][field] = value;
+            // Only the preview re-renders on every keystroke — re-rendering the leg
+            // rows themselves here would blow away focus mid-type.
+            updateBasketPreview();
+        }
+
+        function updateBasketPreview() {
+            const previewEl = document.getElementById("basketPreview");
+            if (!previewEl) return;
+            const totalStake = parseFloat(document.getElementById("basketTotalStake")?.value) || 0;
+            const isGuaranteedArb = document.getElementById("basketGuaranteedArb")?.checked;
+            const validLegs = basketLegs.filter(l => l.price > 0 && l.price < 1);
+
+            if (validLegs.length < 2 || totalStake <= 0) {
+                previewEl.innerHTML = `<span style="color:var(--text-secondary);">Enter at least 2 legs (price between 0 and 1) and a positive stake to see the sizing preview.</span>`;
+                return;
+            }
+
+            const pSum = validLegs.reduce((acc, l) => acc + l.price, 0);
+            const targetShares = totalStake / pSum;
+            const legRows = validLegs.map(l => {
+                const legStake = targetShares * l.price;
+                return `<div style="display:flex; justify-content:space-between;"><span>${escapeHtml(l.outcome || '(unnamed)')}</span><span>$${legStake.toFixed(2)} @ $${l.price.toFixed(2)}</span></div>`;
+            }).join("");
+
+            const edgePct = ((1 - pSum) / pSum) * 100;
+            const edgeColor = edgePct >= 0 ? 'var(--cyber-emerald)' : 'var(--hot-pink)';
+            const edgeLabel = isGuaranteedArb
+                ? `Guaranteed profit if this truly covers every outcome: <strong style="color:${edgeColor};">${edgePct.toFixed(1)}%</strong>`
+                : `If one of these ${validLegs.length} wins: <strong style="color:${edgeColor};">${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%</strong> return. If NONE of them win: total stake lost (this is a subset bet, not guaranteed coverage).`;
+
+            previewEl.innerHTML = `
+                <div style="font-weight:600; margin-bottom:6px;">Set price: $${pSum.toFixed(3)} / $1.00 guaranteed-equal-payout</div>
+                ${legRows}
+                <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">${edgeLabel}</div>
+            `;
+        }
+
+        async function placeManualBasketTrade() {
+            const marketTitle = document.getElementById("basketMarketTitle").value.trim() || "Manual Basket Trade";
+            const totalStake = parseFloat(document.getElementById("basketTotalStake").value);
+            const guaranteedArb = document.getElementById("basketGuaranteedArb").checked;
+
+            if (basketLegs.length < 2) {
+                await CustomDialog.alert("A basket trade needs at least 2 legs.", "Missing Legs", "⚠️");
+                return;
+            }
+            if (isNaN(totalStake) || totalStake <= 0) {
+                await CustomDialog.alert("Please enter a positive total stake.", "Missing Fields", "⚠️");
+                return;
+            }
+            for (const [i, leg] of basketLegs.entries()) {
+                if (!leg.market_id || !leg.token_id) {
+                    await CustomDialog.alert(`Leg ${i + 1} is missing a Market ID or Token ID.`, "Missing Fields", "⚠️");
+                    return;
+                }
+                if (!(leg.price > 0 && leg.price < 1)) {
+                    await CustomDialog.alert(`Leg ${i + 1} price must be between 0 and 1.`, "Invalid Price", "⚠️");
+                    return;
+                }
+            }
+
+            const isLive = document.getElementById("modeSwitch")?.checked;
+            if (isLive) {
+                const ok = await CustomDialog.confirm(
+                    `LIVE MODE — this will spend REAL USDC across ${basketLegs.length} legs.\n\nBasket: ${marketTitle}\nTotal Stake: ~$${totalStake.toFixed(2)}\n\nProceed?`,
+                    'Confirm Live Basket Trade', '🚨'
+                );
+                if (!ok) return;
+            }
+
+            logEvent(`[SYSTEM] Placing manual basket trade (${basketLegs.length} legs) for ${marketTitle}...`);
+            try {
+                const r = await fetch("/api/poly-yield/manual-basket-trade", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        legs: basketLegs.map(l => ({
+                            market_id: l.market_id, token_id: l.token_id, outcome: l.outcome, price: l.price
+                        })),
+                        total_stake_usdc: totalStake,
+                        market_title: marketTitle,
+                        guaranteed_arb: guaranteedArb
+                    })
+                });
+                const res = await r.json();
+                if (r.ok) {
+                    logEvent(`[SYSTEM] Manual basket trade placement SUCCESS: ${res.position_id || 'simulated'}`);
+                    fetchPositions();
+                    fetchStats();
+                    fetchWalletBalance();
+                } else {
+                    logEvent(`[SYSTEM] Manual basket trade placement DENIED: ${res.detail || "Error"}`);
+                    await CustomDialog.alert(res.detail || "Execution failed", "Basket Trade Denied", "❌");
+                }
+            } catch (e) {
+                logEvent(`[SYSTEM] Manual basket trade failure: ${e}`);
+            }
+        }
+
         async function exitPositionPrompt(posId, entryPrice) {
             const exitPriceStr = await CustomDialog.prompt(
                 `Enter exit price (USDC per share) for position:`,
@@ -2792,17 +2995,124 @@
                     { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
                 ]
             },
-            { key: 's9_stablecoin_peg', label: 'S9 Stablecoin Peg Arb', params: [] },
-            { key: 's10_oracle', label: 'S10 Oracle Discrepancy', params: [] },
-            { key: 's11_overreaction', label: 'S11 Overreaction Scalp', params: [] },
-            { key: 's12_momentum', label: 'S12 Trend Momentum', params: [] },
-            { key: 's13_sentiment', label: 'S13 Sentiment Tracker', params: [] },
-            { key: 's14_macro_corr', label: 'S14 Macro Correlation', params: [] },
-            { key: 's15_theta', label: 'S15 Theta Harvester', params: [] },
-            { key: 's16_poll_drift', label: 'S16 Poll Drift', params: [] },
-            { key: 's17_sniper', label: 'S17 Liquidity Sniper', params: [] },
-            { key: 's18_straddle', label: 'S18 Catalyst Straddle', params: [] },
-            { key: 's19_longshot_yes', label: 'S19 Longshot YES', params: [] },
+            {
+                key: 's9_stablecoin_peg',
+                label: 'S9 Stablecoin Peg Arb',
+                params: [
+                    { key: 'min_price', label: 'Min Price', type: 'number', step: '0.005', unit: 'USDC' },
+                    { key: 'max_days_left', label: 'Max Days Left', type: 'number', step: '1', unit: 'days' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's10_oracle',
+                label: 'S10 Oracle Discrepancy',
+                note: 'Buys markets whose end date has passed but Gamma hasn\'t formally closed/settled them yet (UMA lag) — not a live sports/news feed.',
+                params: [
+                    { key: 'min_price', label: 'Min Price', type: 'number', step: '0.005', unit: 'USDC' },
+                    { key: 'max_days_past_expiry', label: 'Max Days Past Expiry', type: 'number', step: '1', unit: 'days' },
+                    { key: 'assumed_settlement_days', label: 'Assumed Settlement Wait', type: 'number', step: '0.5', unit: 'days' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's11_overreaction',
+                label: 'S11 Overreaction Scalp',
+                note: 'Signal comes from this bot\'s own rolling price samples (in-process, resets on restart), not an external tick feed.',
+                params: [
+                    { key: 'spike_threshold_pct', label: 'Spike Threshold', type: 'number', step: '0.5', unit: '%' },
+                    { key: 'lookback_s', label: 'Lookback', type: 'number', step: '60', unit: 'sec' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's12_momentum',
+                label: 'S12 Trend Momentum',
+                note: 'Signal comes from this bot\'s own rolling price samples (in-process, resets on restart), not an external tick feed.',
+                params: [
+                    { key: 'trend_threshold_pct', label: 'Trend Threshold', type: 'number', step: '0.5', unit: '%' },
+                    { key: 'lookback_s', label: 'Lookback', type: 'number', step: '60', unit: 'sec' },
+                    { key: 'min_samples', label: 'Min Samples', type: 'number', step: '1', unit: 'cnt' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's13_sentiment',
+                label: 'S13 Sentiment Tracker',
+                note: 'PROXY only (order-flow book imbalance + price momentum) — not real news/social sentiment. 🔜 Coming soon: true multi-source sentiment via GDELT + other signals.',
+                params: [
+                    { key: 'lookback_s', label: 'Lookback', type: 'number', step: '60', unit: 'sec' },
+                    { key: 'score_threshold', label: 'Score Threshold', type: 'number', step: '0.05', unit: '(-1..1)' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's14_macro_corr',
+                label: 'S14 Macro Correlation',
+                note: 'Intra-platform PROXY: trades user-curated correlated Polymarket pairs only (config key s14_macro_corr.correlation_pairs) — not real macro/economic index data. No signals until pairs are curated.',
+                params: [
+                    { key: 'min_gap_pct', label: 'Min Gap', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's15_theta',
+                label: 'S15 Theta Harvester',
+                params: [
+                    { key: 'min_yes_price', label: 'Min YES Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'max_yes_price', label: 'Max YES Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'min_days_left', label: 'Min Days Left', type: 'number', step: '1', unit: 'days' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's16_poll_drift',
+                label: 'S16 Poll Drift',
+                note: 'PROXY: election-market price trend, not a real polling-aggregator feed (538/RCP etc.).',
+                params: [
+                    { key: 'trend_threshold_pct', label: 'Trend Threshold', type: 'number', step: '0.5', unit: '%' },
+                    { key: 'lookback_s', label: 'Lookback', type: 'number', step: '300', unit: 'sec' },
+                    { key: 'min_samples', label: 'Min Samples', type: 'number', step: '1', unit: 'cnt' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'min_apy', label: 'Min APY', type: 'number', step: '0.1', unit: '%' }
+                ]
+            },
+            {
+                key: 's17_sniper',
+                label: 'S17 Liquidity Sniper',
+                params: [
+                    { key: 'min_profit_pct', label: 'Min Profit', type: 'number', step: '0.1', unit: '%' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's18_straddle',
+                label: 'S18 Catalyst Straddle',
+                note: 'Entry only — the payoff requires manually exiting the winning leg after a catalyst resolves the uncertainty, not holding to resolution.',
+                params: [
+                    { key: 'min_leg_price', label: 'Min Leg Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'max_leg_price', label: 'Max Leg Price', type: 'number', step: '0.01', unit: 'USDC' },
+                    { key: 'max_cost_ratio', label: 'Max Cost Ratio', type: 'number', step: '0.01', unit: 'x' },
+                    { key: 'max_position_pct', label: 'Max Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
+            {
+                key: 's19_longshot_yes',
+                label: 'S19 Longshot YES',
+                note: 'Deliberate negative-EV tail bets (opposite side of S1/S6) — sized tiny on purpose, with its own total-exposure cap.',
+                params: [
+                    { key: 'max_yes_price', label: 'Max YES Price', type: 'number', step: '0.001', unit: 'USDC' },
+                    { key: 'max_positions', label: 'Max Positions', type: 'number', step: '1', unit: 'cnt' },
+                    { key: 'position_pct', label: 'Position Size', type: 'number', step: '0.1', unit: '%', multiplier: 100 },
+                    { key: 'max_total_allocation_pct', label: 'Max Total Allocation', type: 'number', step: '0.1', unit: '%', multiplier: 100 }
+                ]
+            },
             {
                 key: 's20_dutching',
                 label: 'S20 Top-N Dutching',
@@ -2850,6 +3160,10 @@
                     `;
                 }).join("");
                 
+                const noteHtml = s.note
+                    ? `<div class="strategy-card-note" style="font-size:11px; line-height:1.4; color:var(--text-secondary); background:var(--surface-alt); border-left:2px solid var(--alert-orange); padding:6px 8px; margin-bottom:8px; border-radius:4px;">${s.note}</div>`
+                    : '';
+
                 return `
                     <div class="strategy-card">
                         <div class="strategy-card-header">
@@ -2859,6 +3173,7 @@
                                 <span class="slider" style="border-radius:20px;"></span>
                             </label>
                         </div>
+                        ${noteHtml}
                         <div class="control-group" style="margin-bottom: 8px;">
                             <span class="param-label">Execution Mode</span>
                             <select id="mode_${s.key}" class="control-input" onchange="saveStrategyMode('${s.key}', this)" style="padding: 6px 10px; font-size: 12px; height: 28px; line-height: 12px; margin-top: 4px;">
@@ -3393,11 +3708,24 @@
                 const maxLoss = opp.max_loss_usdc || 0;
                 const maxLossStr = maxLoss < 0 ? `-$${Math.abs(maxLoss).toFixed(2)}` : `$${maxLoss.toFixed(2)}`;
 
+                // fillable defaults true — only set to false when a leg already failed the
+                // live-book fillability check at scan time (see opp.unfillable_reason).
+                const isUnfillable = opp.fillable === 0 || opp.fillable === false;
+                const unfillableBadge = isUnfillable
+                    ? `<span class="badge" style="background:var(--warning-bg,rgba(255,140,0,0.15)); color:var(--alert-orange); white-space:nowrap; margin-left:8px;" title="${escapeHtml(opp.unfillable_reason || 'One or more legs failed the live order-book fillability check.')}">⚠️ Unfillable</span>`
+                    : '';
+                const quickTradeBtn = isUnfillable
+                    ? `<button class="btn" disabled title="${escapeHtml(opp.unfillable_reason || 'Not fillable at scan time.')}" style="padding:6px 12px; font-size:11px; opacity:0.45; cursor:not-allowed;">Unfillable</button>`
+                    : `<button class="btn" style="padding:6px 12px; font-size:11px;" onclick="executeQuickDutch(${idx}, event)">⚡ Quick Trade</button>`;
+
                 return `
                     <div style="background: var(--surface); padding: 16px; border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; box-shadow: var(--shadow-sm);">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 12px;">
                             <span style="font-weight:700; font-family:'Space Grotesk', sans-serif; font-size:14px; line-height: 1.3;">${escapeHtml(opp.market_title)}</span>
-                            <span class="badge badge-low" style="white-space: nowrap; margin-left: 8px;">${roiStr}% ROI</span>
+                            <span style="display:flex; align-items:center; white-space:nowrap; margin-left: 8px;">
+                                <span class="badge badge-low" style="white-space: nowrap;">${roiStr}% ROI</span>
+                                ${unfillableBadge}
+                            </span>
                         </div>
                         <div style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; flex-grow: 1;">
                             Top Candidates: <strong style="color:var(--text-primary);">${escapeHtml(topCandidates.join(", "))}</strong>
@@ -3414,7 +3742,7 @@
                         </div>
                         <div style="display:flex; gap:8px;">
                             <button class="btn btn-emerald" style="padding:6px 12px; font-size:11px; flex:1; justify-content: center;" onclick="triggerSideBySideEval(${idx})">🤖 Run Multi-LLM Evaluation</button>
-                            <button class="btn" style="padding:6px 12px; font-size:11px;" onclick="executeQuickDutch(${idx}, event)">⚡ Quick Trade</button>
+                            ${quickTradeBtn}
                         </div>
                     </div>
                 `;
@@ -3758,6 +4086,7 @@
         fetchOpportunities();
         fetchPositions();
         fetchStats();
+        switchManualTradeMode('single');
 
         // Refresh data periodically
         setInterval(fetchWalletBalance, 10000);

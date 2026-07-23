@@ -58,6 +58,24 @@ class ManualTradeArgs(BaseModel):
     token_id: Optional[str] = None
     market_title: Optional[str] = "Manual Position"
 
+class ManualBasketLegArgs(BaseModel):
+    market_id: str
+    token_id: str
+    outcome: str
+    price: float  # reference price used for proportional sizing; the live book is
+                  # re-verified per leg at execution time regardless (same as every
+                  # other multi-leg strategy — this number is never trusted blindly)
+
+class ManualBasketTradeArgs(BaseModel):
+    legs: list[ManualBasketLegArgs]
+    total_stake_usdc: float
+    market_title: str = "Manual Basket Trade"
+    guaranteed_arb: bool = False  # true only if the human building this basket knows
+                                  # it covers every possible outcome (e.g. replicating
+                                  # an S3/S17-style complete-coverage arb); false (the
+                                  # default) is the safe assumption for a Dutching-style
+                                  # subset bet, where an uncovered outcome can still win
+
 class ExitArgs(BaseModel):
     current_price: float
 
@@ -428,6 +446,76 @@ async def place_manual_trade(trade: ManualTradeArgs, _=Depends(verify_token)):
         return res
     else:
         raise HTTPException(status_code=400, detail=res.get("error", "Execution failed"))
+
+@app.post("/api/poly-yield/manual-basket-trade")
+async def place_manual_basket_trade(trade: ManualBasketTradeArgs, _=Depends(verify_token)):
+    """Place a manual multi-leg basket trade — the generic tool behind Dutching-style
+    'spread stake across several picks for a uniform payout if any one hits' bets,
+    covering the same use case as S20 Dutching but for markets/candidates the human
+    building the basket chooses themselves, not just ones the bot already scanned.
+
+    This does NOT re-implement the Dutching math — it hands the legs to the exact
+    same hardened engine.execute_opportunity() -> _execute_multi_leg() pipeline every
+    multi-leg strategy (S3, S5, S17, S18, S20) already uses: proportional sizing by
+    price, a live per-leg order-book pre-flight (liquidity/slippage/drift), and
+    partial-fill rollback + killswitch if one leg fills and another doesn't.
+    """
+    if len(trade.legs) < 2:
+        raise HTTPException(status_code=400, detail="A basket trade needs at least 2 legs — for a single outcome use the regular Manual Trade form")
+    if trade.total_stake_usdc <= 0:
+        raise HTTPException(status_code=400, detail="Total stake must be positive")
+
+    for i, leg in enumerate(trade.legs):
+        if not leg.market_id or not leg.market_id.strip():
+            raise HTTPException(status_code=400, detail=f"Leg {i + 1}: market_id is required")
+        if not leg.token_id or not leg.token_id.strip():
+            raise HTTPException(status_code=400, detail=f"Leg {i + 1}: token_id is required")
+        if not (0.0 < leg.price < 1.0):
+            raise HTTPException(status_code=400, detail=f"Leg {i + 1}: price must be between 0 and 1 (exclusive)")
+
+    legs_payload = [
+        {
+            "outcome": leg.outcome or f"Leg {i + 1}",
+            "price": leg.price,
+            "token_id": leg.token_id,
+            "market_id": leg.market_id,
+        }
+        for i, leg in enumerate(trade.legs)
+    ]
+    p_sum = sum(leg.price for leg in trade.legs)
+
+    opp = {
+        "id": f"opp_manual_basket_{uuid.uuid4().hex[:8]}",
+        "strategy": "manual",
+        "market_id": trade.legs[0].market_id,  # representative id — only used for the market lock
+        "market_title": trade.market_title,
+        "outcome": f"Manual Basket ({len(trade.legs)} legs): " + ", ".join(l.outcome for l in trade.legs)[:120],
+        "entry_price": round(p_sum, 4),
+        "p_sum": round(p_sum, 4),
+        "suggested_usdc": trade.total_stake_usdc,
+        "exec_mode": "manual",
+        "risk_level": "Medium",
+        # See ManualBasketTradeArgs.guaranteed_arb docstring — default is the safe
+        # (Dutching-style, subset-can-lose) assumption; only set guaranteed_arb when
+        # the human building this basket knows every possible outcome is covered.
+        "payoff_type": "guaranteed_arb" if trade.guaranteed_arb else "conditional_multi_leg",
+        "annualized_apy": None,
+        "profit_pct": round(((1.0 - p_sum) / p_sum) * 100, 2) if p_sum > 0 else None,
+        "days_to_expiry": None,
+        "action": "BUY_BASKET",
+        "instructions": [],
+        "legs": legs_payload,
+    }
+
+    # Save opportunity record so foreign keys validate
+    await poly_yield_engine._upsert_opportunity(opp)
+
+    res = await poly_yield_engine.execute_opportunity(opp, triggered_by="manual")
+    if res.get("success"):
+        return res
+    else:
+        raise HTTPException(status_code=400, detail=res.get("error", "Execution failed"))
+
 
 @app.post("/api/poly-yield/exit/{pos_id}")
 async def exit_open_position(pos_id: str, args: ExitArgs, _=Depends(verify_token)):
